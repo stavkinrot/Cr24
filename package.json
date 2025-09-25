@@ -4,16 +4,18 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "icons": "node scripts/build-icons.mjs",
     "dev": "vite",
-    "build": "vite build",
+    "build": "npm run icons && vite build",
     "preview": "vite preview --port 5173"
   },
   "devDependencies": {
+    "@types/chrome": "^0.0.262",
+    "@types/node": "^20.14.10",
     "typescript": "^5.6.2",
     "vite": "^5.4.8",
     "vite-plugin-static-copy": "^1.0.3",
-    "@types/chrome": "^0.0.262",
-    "@types/node": "^20.14.10"
+    "sharp": "^0.33.4"
   },
   "dependencies": {
     "jszip": "^3.10.1"

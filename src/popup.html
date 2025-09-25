@@ -60,6 +60,34 @@ http://*/*</textarea>
           <textarea id="prompt" rows="4" placeholder="Describe what the generated extension should do"></textarea>
         </div>
 
+        <h2 class="section-title">Icons</h2>
+        <div class="card">
+          <div>
+            <label><input type="radio" name="icon-mode" id="icon-mode-auto" checked /> Auto-generate initials</label>
+            <label><input type="radio" name="icon-mode" id="icon-mode-upload" /> Upload logo (PNG/SVG)</label>
+          </div>
+
+          <div id="icon-colors">
+            <div class="row" style="grid-template-columns: 1fr 1fr 1fr;">
+              <label>BG
+                <input id="icon-bg" type="color" value="#121a34" />
+              </label>
+              <label>Border
+                <input id="icon-border" type="color" value="#7aa2f7" />
+              </label>
+              <label>Text
+                <input id="icon-text" type="color" value="#e6e9f2" />
+              </label>
+            </div>
+          </div>
+
+          <div style="margin-top:8px;">
+            <input id="icon-upload" type="file" accept="image/png,image/svg+xml" />
+          </div>
+
+          <div id="icon-preview" class="icon-preview" style="margin-top:8px;"></div>
+        </div>
+
         <div class="actions">
           <button id="generateBtn" type="submit">Generate ZIP</button>
         </div>

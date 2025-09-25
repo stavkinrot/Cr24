@@ -8,6 +8,12 @@ export type Features = {
   sidePanel: boolean;
 };
 
+type IconOptions = {
+  mode: 'auto' | 'upload';
+  colors?: { bg: string; border: string; text: string };
+  uploadDataUrl?: string; // data URL of uploaded PNG/SVG
+};
+
 export type GenerateOptions = {
   name: string;
   description: string;
@@ -17,6 +23,7 @@ export type GenerateOptions = {
   features: Features;
   matches: string[];
   prompt: string;
+  icons?: IconOptions; // optional icon configuration
 };
 
 type TokenMap = Record<string, string>;
@@ -94,25 +101,45 @@ function composeManifest(opts: GenerateOptions) {
 }
 
 async function makeIconBase64(size: number, label: string): Promise<string> {
+  // Legacy: dark theme colors
   const canvas = document.createElement('canvas');
   canvas.width = size;
   canvas.height = size;
   const ctx = canvas.getContext('2d')!;
-  // Background
   ctx.fillStyle = '#121a34';
   ctx.fillRect(0, 0, size, size);
-  // Accent border
   ctx.strokeStyle = '#7aa2f7';
   ctx.lineWidth = Math.max(2, Math.round(size / 16));
   ctx.strokeRect(ctx.lineWidth / 2, ctx.lineWidth / 2, size - ctx.lineWidth, size - ctx.lineWidth);
-  // Letter
   ctx.fillStyle = '#e6e9f2';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.font = `${Math.round(size * 0.55)}px system-ui, sans-serif`;
   ctx.fillText(label, size / 2, Math.round(size * 0.56));
   const dataUrl = canvas.toDataURL('image/png');
-  return dataUrl.split(',')[1]; // base64 payload
+  return dataUrl.split(',')[1];
+}
+
+async function makeIconBase64Colored(size: number, label: string, colors: { bg: string; border: string; text: string }): Promise<string> {
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d')!;
+  // Background
+  ctx.fillStyle = colors.bg;
+  ctx.fillRect(0, 0, size, size);
+  // Accent border
+  ctx.strokeStyle = colors.border;
+  ctx.lineWidth = Math.max(2, Math.round(size / 16));
+  ctx.strokeRect(ctx.lineWidth / 2, ctx.lineWidth / 2, size - ctx.lineWidth, size - ctx.lineWidth);
+  // Letter
+  ctx.fillStyle = colors.text;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = `${Math.round(size * 0.55)}px system-ui, sans-serif`;
+  ctx.fillText(label, size / 2, Math.round(size * 0.56));
+  const dataUrl = canvas.toDataURL('image/png');
+  return dataUrl.split(',')[1];
 }
 
 async function generateIconsBase64(name: string) {
@@ -121,6 +148,51 @@ async function generateIconsBase64(name: string) {
   const out: Record<number, string> = {};
   for (const s of sizes) {
     out[s] = await makeIconBase64(s, letter);
+  }
+  return out;
+}
+
+async function generateIconsBase64WithColors(name: string, colors: { bg: string; border: string; text: string }) {
+  const letter = (name.trim()[0] || 'X').toUpperCase();
+  const sizes = [16, 32, 48, 128];
+  const out: Record<number, string> = {};
+  for (const s of sizes) {
+    out[s] = await makeIconBase64Colored(s, letter, colors);
+  }
+  return out;
+}
+
+function loadImage(dataUrl: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = (e) => reject(e);
+    img.src = dataUrl;
+  });
+}
+
+async function generateIconsFromUpload(dataUrl: string) {
+  const sizes = [16, 32, 48, 128];
+  const out: Record<number, string> = {};
+  const img = await loadImage(dataUrl);
+  for (const s of sizes) {
+    const canvas = document.createElement('canvas');
+    canvas.width = s;
+    canvas.height = s;
+    const ctx = canvas.getContext('2d')!;
+    // Clear transparent background
+    ctx.clearRect(0, 0, s, s);
+    // Fit image using contain while centering
+    const scale = Math.min(s / img.width, s / img.height);
+    const dw = Math.round(img.width * scale);
+    const dh = Math.round(img.height * scale);
+    const dx = Math.floor((s - dw) / 2);
+    const dy = Math.floor((s - dh) / 2);
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(img, dx, dy, dw, dh);
+    const b64 = canvas.toDataURL('image/png').split(',')[1];
+    out[s] = b64;
   }
   return out;
 }
@@ -278,7 +350,13 @@ export async function generateZip(opts: GenerateOptions): Promise<void> {
   }
 
   // Icons
-  const icons = await generateIconsBase64(opts.name);
+  let icons: Record<number, string>;
+  if (opts.icons?.mode === 'upload' && opts.icons.uploadDataUrl) {
+    icons = await generateIconsFromUpload(opts.icons.uploadDataUrl);
+  } else {
+    const colors = opts.icons?.colors || { bg: '#121a34', border: '#7aa2f7', text: '#e6e9f2' };
+    icons = await generateIconsBase64WithColors(opts.name, colors);
+  }
   for (const size of [16, 32, 48, 128] as const) {
     zip.file(`icons/${size}.png`, icons[size], { base64: true });
   }
