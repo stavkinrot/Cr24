@@ -1,0 +1,54 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Node/Vite
+node_modules/
+dist/
+dist-ssr/
+.vite/
+*.local
+
+# Build artifacts
+build/
+out/
+
+# Coverage
+coverage/
+
+# Editor/OS
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Caches
+.cache/
+*.cache/
+.eslintcache
+.stylelintcache
+*.tsbuildinfo
+
+# Env files
+.env
+.env.local
+.env.*.local
+.env.development.local
+.env.test.local
+.env.production.local
+!.env.example
+
+# Chrome extension artifacts
+*.crx
+*.pem
+
+# Temporary
+tmp/
+temp/

@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>CRX Generator</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link href="./styles.css" rel="stylesheet" />
+  </head>
+  <body>
+    <main class="container">
+      <header class="appbar">
+        <h1>Chrome Extension Generator</h1>
+        <button id="themeToggle" type="button" aria-label="Toggle theme">Toggle theme</button>
+      </header>
+
+      <form id="gen-form">
+        <h2 class="section-title">Project</h2>
+        <div class="card">
+          <label>
+            Name
+            <input id="name" type="text" placeholder="My Extension" required />
+          </label>
+          <label>
+            Description
+            <textarea id="description" rows="2" placeholder="What it does"></textarea>
+          </label>
+          <label>
+            Version
+            <input id="version" type="text" value="0.1.0" required />
+          </label>
+          <div class="row">
+            <label>
+              Author
+              <input id="author" type="text" placeholder="Your Name" />
+            </label>
+            <label>
+              Year
+              <input id="year" type="number" min="2000" max="2100" />
+            </label>
+          </div>
+        </div>
+
+        <h2 class="section-title">Features</h2>
+        <div class="card">
+          <label><input id="feat-popup" type="checkbox" checked /> Popup</label>
+          <label><input id="feat-bg" type="checkbox" /> Background</label>
+          <label><input id="feat-cs" type="checkbox" /> Content script</label>
+          <label><input id="feat-options" type="checkbox" /> Options page</label>
+          <label><input id="feat-sidepanel" type="checkbox" /> Side panel</label>
+        </div>
+
+        <h2 class="section-title">Content script matches</h2>
+        <div class="card">
+          <textarea id="matches" rows="3">https://*/*
+http://*/*</textarea>
+        </div>
+
+        <h2 class="section-title">Prompt</h2>
+        <div class="card">
+          <textarea id="prompt" rows="4" placeholder="Describe what the generated extension should do"></textarea>
+        </div>
+
+        <div class="actions">
+          <button id="generateBtn" type="submit">Generate ZIP</button>
+        </div>
+      </form>
+
+      <footer class="note">
+        No permissions required. All generation happens locally.
+      </footer>
+    </main>
+    <script type="module" src="./popup.ts"></script>
+  </body>
+</html>

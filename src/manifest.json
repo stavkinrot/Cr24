@@ -1,0 +1,10 @@
+{
+  "manifest_version": 3,
+  "name": "CRX Extension Generator",
+  "version": "0.1.0",
+  "description": "Generate Chrome extensions from a prompt and options.",
+  "action": {
+    "default_title": "Generate extension",
+    "default_popup": "src/popup.html"
+  }
+}
