@@ -1,4 +1,4 @@
-import { generateZip } from './generator/index';
+import { generateZip, generateZipFromFiles } from './generator/index';
 
 function $(id: string) {
   return document.getElementById(id)!;
@@ -229,4 +229,245 @@ document.addEventListener('DOMContentLoaded', () => {
       btn.textContent = 'Generate ZIP';
     }
   });
+
+  /* ================= AI (Server Proxy) Section ================= */
+  const aiModelSel = document.getElementById('ai-model') as HTMLSelectElement | null;
+  const aiTempRange = document.getElementById('ai-temp') as HTMLInputElement | null;
+  const aiTempVal = document.getElementById('ai-temp-val') as HTMLSpanElement | null;
+  const aiPlanBtn = document.getElementById('ai-plan') as HTMLButtonElement | null;
+  const aiGenBtn = document.getElementById('ai-generate') as HTMLButtonElement | null;
+  const aiDlBtn = document.getElementById('ai-download') as HTMLButtonElement | null;
+  const aiRetryBtn = document.getElementById('ai-retry') as HTMLButtonElement | null;
+  const aiStatus = document.getElementById('ai-status') as HTMLDivElement | null;
+  const aiPlanFilesBox = document.getElementById('ai-plan-files') as HTMLDivElement | null;
+  const aiFilesReviewBox = document.getElementById('ai-files-review') as HTMLDivElement | null;
+
+  type AIPlan = {
+    planVersion: number;
+    summary: string;
+    features: Record<string, boolean>;
+    files: { path: string; purpose: string }[];
+    risks?: string[];
+  } | null;
+
+  type AIGeneratedFile = { path: string; content: string; included: boolean };
+ 
+  let currentPlan: AIPlan = null;
+  let generatedFiles: AIGeneratedFile[] = [];
+  let lastPhase: 'plan' | 'generate' | null = null;
+ 
+  // Local dev proxy base (replace with deployed Vercel base when ready)
+  const API_BASE = 'http://localhost:3000';
+
+  function setAIStatus(msg: string, isError = false) {
+    if (!aiStatus) return;
+    aiStatus.textContent = msg;
+    aiStatus.style.color = isError ? 'var(--danger, #d33)' : 'var(--muted, #888)';
+    if (aiRetryBtn) {
+      if (isError && lastPhase) {
+        aiRetryBtn.disabled = false;
+        aiRetryBtn.style.display = 'inline-block';
+      } else {
+        aiRetryBtn.disabled = true;
+        aiRetryBtn.style.display = 'none';
+      }
+    }
+  }
+
+  function renderPlanFiles() {
+    if (!aiPlanFilesBox) return;
+    aiPlanFilesBox.innerHTML = '';
+    if (!currentPlan) return;
+    const ul = document.createElement('ul');
+    ul.style.margin = '0';
+    ul.style.padding = '0 0 0 16px';
+    currentPlan.files.forEach(f => {
+      const li = document.createElement('li');
+      li.style.fontSize = '12px';
+      li.textContent = `${f.path} – ${f.purpose}`;
+      ul.appendChild(li);
+    });
+    aiPlanFilesBox.appendChild(ul);
+    if (currentPlan.risks?.length) {
+      const risks = document.createElement('div');
+      risks.style.fontSize = '11px';
+      risks.style.marginTop = '6px';
+      risks.innerHTML = '<strong>Risks:</strong> ' + currentPlan.risks.join('; ');
+      aiPlanFilesBox.appendChild(risks);
+    }
+  }
+
+  function renderGeneratedFiles() {
+    if (!aiFilesReviewBox) return;
+    aiFilesReviewBox.style.display = 'block';
+    aiFilesReviewBox.innerHTML = '';
+    if (!generatedFiles.length) {
+      aiFilesReviewBox.textContent = 'No files generated.';
+      return;
+    }
+    const frag = document.createDocumentFragment();
+    generatedFiles.forEach(f => {
+      const wrap = document.createElement('div');
+      wrap.style.border = '1px solid var(--border,#333)';
+      wrap.style.borderRadius = '4px';
+      wrap.style.marginBottom = '6px';
+      wrap.style.padding = '4px 6px';
+      wrap.style.fontSize = '12px';
+
+      const head = document.createElement('div');
+      head.style.display = 'flex';
+      head.style.alignItems = 'center';
+      head.style.gap = '6px';
+
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = f.included;
+      cb.addEventListener('change', () => { f.included = cb.checked; });
+
+      const strong = document.createElement('strong');
+      strong.textContent = f.path;
+
+      const size = new Blob([f.content]).size;
+      const sizeSpan = document.createElement('span');
+      sizeSpan.textContent = `(${size} B)`;
+      sizeSpan.style.opacity = '0.7';
+
+      const toggle = document.createElement('button');
+      toggle.type = 'button';
+      toggle.textContent = 'View';
+      toggle.style.marginLeft = 'auto';
+      toggle.style.fontSize = '11px';
+
+      const pre = document.createElement('pre');
+      pre.style.display = 'none';
+      pre.style.whiteSpace = 'pre';
+      pre.style.overflow = 'auto';
+      pre.style.marginTop = '4px';
+      pre.textContent = f.content;
+
+      toggle.addEventListener('click', () => {
+        const open = pre.style.display === 'block';
+        pre.style.display = open ? 'none' : 'block';
+        toggle.textContent = open ? 'View' : 'Hide';
+      });
+
+      head.appendChild(cb);
+      head.appendChild(strong);
+      head.appendChild(sizeSpan);
+      head.appendChild(toggle);
+      wrap.appendChild(head);
+      wrap.appendChild(pre);
+      frag.appendChild(wrap);
+    });
+    aiFilesReviewBox.appendChild(frag);
+  }
+
+  async function postPhase(phase: 'plan' | 'generate', extra: any = {}) {
+    const payload: any = {
+      phase,
+      prompt: ( $('prompt') as HTMLTextAreaElement )?.value || '',
+      features: {
+        popup: ( $('feat-popup') as HTMLInputElement )?.checked || false,
+        background: ( $('feat-bg') as HTMLInputElement )?.checked || false,
+        contentScript: ( $('feat-cs') as HTMLInputElement )?.checked || false,
+        optionsPage: ( $('feat-options') as HTMLInputElement )?.checked || false,
+        sidePanel: ( $('feat-sidepanel') as HTMLInputElement )?.checked || false,
+      },
+      matches: parseMatches( ( $('matches') as HTMLTextAreaElement )?.value || '' ),
+      model: aiModelSel?.value || 'gpt-4o-mini',
+      temperature: aiTempRange ? Number(aiTempRange.value) : 0.4,
+      ...extra
+    };
+
+    const resp = await fetch(`${API_BASE}/api/extension-ai`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (!resp.ok) {
+      const txt = await resp.text();
+      throw new Error(`HTTP ${resp.status}: ${txt.slice(0, 300)}`);
+    }
+    return resp.json();
+  }
+
+  async function handlePlan() {
+    if (!aiPlanBtn) return;
+    aiPlanBtn.disabled = true;
+    aiGenBtn && (aiGenBtn.disabled = true);
+    aiDlBtn && (aiDlBtn.disabled = true);
+    if (aiRetryBtn) { aiRetryBtn.disabled = true; aiRetryBtn.style.display = 'none'; }
+    lastPhase = 'plan';
+    setAIStatus('Planning...');
+    aiPlanFilesBox && (aiPlanFilesBox.innerHTML = '');
+    try {
+      const data = await postPhase('plan');
+      currentPlan = data.plan;
+      renderPlanFiles();
+      setAIStatus('Plan ready.');
+      aiGenBtn && (aiGenBtn.disabled = false);
+    } catch (e: any) {
+      setAIStatus(`Plan failed: ${e.message}`, true);
+    } finally {
+      aiPlanBtn.disabled = false;
+    }
+  }
+
+  async function handleGenerate() {
+    if (!currentPlan || !aiGenBtn) return;
+    aiGenBtn.disabled = true;
+    aiPlanBtn && (aiPlanBtn.disabled = true);
+    aiDlBtn && (aiDlBtn.disabled = true);
+    if (aiRetryBtn) { aiRetryBtn.disabled = true; aiRetryBtn.style.display = 'none'; }
+    lastPhase = 'generate';
+    setAIStatus('Generating files...');
+    aiFilesReviewBox && (aiFilesReviewBox.style.display = 'none');
+    try {
+      const data = await postPhase('generate', { plan: currentPlan });
+      generatedFiles = (data.files || []).map((f: any) => ({ ...f, included: true }));
+      renderGeneratedFiles();
+      setAIStatus('Files generated.');
+      aiDlBtn && (aiDlBtn.disabled = false);
+    } catch (e: any) {
+      setAIStatus(`Generate failed: ${e.message}`, true);
+    } finally {
+      aiGenBtn.disabled = false;
+      aiPlanBtn && (aiPlanBtn.disabled = false);
+    }
+  }
+
+  async function handleDownloadAI() {
+    if (!generatedFiles.length || !aiDlBtn) return;
+    aiDlBtn.disabled = true;
+    setAIStatus('Preparing ZIP...');
+    try {
+      const selected = generatedFiles.filter(f => f.included);
+      if (!selected.length) throw new Error('No files selected');
+      await generateZipFromFiles(
+        selected.map(f => ({ path: f.path, content: f.content })),
+        {
+          name: ( $('name') as HTMLInputElement )?.value || 'AI Extension',
+          version: ( $('version') as HTMLInputElement )?.value || '0.1.0',
+          addIconsIfMissing: true
+        }
+      );
+      setAIStatus('ZIP downloaded.');
+    } catch (e: any) {
+      setAIStatus(`ZIP failed: ${e.message}`, true);
+    } finally {
+      aiDlBtn.disabled = false;
+    }
+  }
+
+  aiTempRange?.addEventListener('input', () => {
+    if (aiTempVal) aiTempVal.textContent = aiTempRange.value;
+  });
+  aiPlanBtn?.addEventListener('click', handlePlan);
+  aiGenBtn?.addEventListener('click', handleGenerate);
+  aiDlBtn?.addEventListener('click', handleDownloadAI);
+  aiRetryBtn?.addEventListener('click', () => {
+    if (lastPhase === 'plan') handlePlan();
+    else if (lastPhase === 'generate') handleGenerate();
+  });
+
 });

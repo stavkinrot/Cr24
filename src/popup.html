@@ -60,6 +60,30 @@ http://*/*</textarea>
           <textarea id="prompt" rows="4" placeholder="Describe what the generated extension should do"></textarea>
         </div>
 
+        <h2 class="section-title">AI (Server)</h2>
+        <div class="card" id="ai-section">
+          <label>
+            Model
+            <select id="ai-model">
+              <option value="gpt-4o-mini" selected>gpt-4o-mini</option>
+              <option value="gpt-4o">gpt-4o</option>
+            </select>
+          </label>
+          <label style="display:flex;align-items:center;gap:6px;">
+            Temperature
+            <input id="ai-temp" type="range" min="0" max="1" step="0.05" value="0.4" style="flex:1;" />
+            <span id="ai-temp-val" style="min-width:32px;text-align:right;">0.4</span>
+          </label>
+          <div class="row" style="grid-template-columns:1fr 1fr 1fr;">
+            <button id="ai-plan" type="button">AI Plan</button>
+            <button id="ai-generate" type="button" disabled>AI Generate</button>
+            <button id="ai-download" type="button" disabled>Download AI ZIP</button>
+          </div>
+          <div id="ai-status" style="margin-top:8px;font-size:12px;color:var(--muted);"></div>
+            <button id="ai-retry" type="button" disabled style="margin-top:6px;display:none;">Retry Last</button>
+          <div id="ai-plan-files" style="margin-top:8px;max-height:140px;overflow:auto;"></div>
+          <div id="ai-files-review" style="margin-top:8px;max-height:200px;overflow:auto;display:none;"></div>
+        </div>
         <h2 class="section-title">Icons</h2>
         <div class="card">
           <div>

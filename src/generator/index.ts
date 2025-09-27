@@ -371,3 +371,126 @@ export async function generateZip(opts: GenerateOptions): Promise<void> {
   a.remove();
   URL.revokeObjectURL(url);
 }
+
+// --- AI helper: generate a ZIP from an already prepared list of files (AI output) ---
+// Files must include manifest.json. If icons are missing and addIconsIfMissing=true, placeholder
+// icons will be generated using either provided name initial or 'X'.
+export async function generateZipFromFiles(
+  files: { path: string; content: string }[],
+  opts: {
+    name: string;
+    version?: string;
+    addIconsIfMissing?: boolean;
+    // Optional icon colors (same structure as automatic icons)
+    colors?: { bg: string; border: string; text: string };
+    downloadName?: string; // base filename for zip (without .zip)
+  }
+): Promise<void> {
+  if (!Array.isArray(files) || !files.length) {
+    throw new Error('No files supplied');
+  }
+  const hasManifest = files.some(f => f.path === 'manifest.json');
+  if (!hasManifest) {
+    throw new Error('manifest.json missing');
+  }
+
+  const zip = new JSZip();
+
+  // Write provided files verbatim
+  const existingPaths = new Set<string>();
+  for (const f of files) {
+    // Normalize simple leading slashes
+    const normalized = f.path.replace(/^\/+/, '');
+    existingPaths.add(normalized);
+    zip.file(normalized, f.content);
+  }
+
+  // Attempt to parse manifest to discover declared icon paths
+  let manifestIconsSpec: { size: number; path: string }[] = [];
+  if (opts.addIconsIfMissing) {
+    try {
+      const manifestFile = files.find(f => f.path === 'manifest.json');
+      if (manifestFile) {
+        const manifestJson = JSON.parse(manifestFile.content);
+        if (manifestJson && typeof manifestJson.icons === 'object' && manifestJson.icons) {
+          for (const [k, v] of Object.entries(manifestJson.icons)) {
+            if (typeof v === 'string') {
+              const sizeNum = Number.parseInt(k, 10);
+              manifestIconsSpec.push({
+                size: Number.isFinite(sizeNum) ? sizeNum : 128,
+                path: v.replace(/^\/+/, ''),
+              });
+            }
+          }
+        }
+      }
+    } catch {
+      // swallow JSON errors; we only do best-effort augmentation
+    }
+  }
+
+  // Helper to determine if any icon asset already exists
+  const anyIconAssetPresent = () =>
+    Array.from(existingPaths).some(p => /icon/i.test(p) && /\.(png|svg)$/i.test(p));
+
+  const letter = (opts.name?.trim?.()[0] || 'X').toUpperCase();
+
+  // Generate any missing manifest-declared icon assets
+  if (opts.addIconsIfMissing && manifestIconsSpec.length) {
+    const colors = opts.colors || { bg: '#121a34', border: '#7aa2f7', text: '#e6e9f2' };
+    for (const spec of manifestIconsSpec) {
+      if (!existingPaths.has(spec.path)) {
+        // Reuse colored icon helper for arbitrary size
+        const size = Math.max(16, Math.min(spec.size || 128, 512));
+        const canvas = document.createElement('canvas');
+        canvas.width = size;
+        canvas.height = size;
+        const ctx = canvas.getContext('2d')!;
+        ctx.fillStyle = colors.bg;
+        ctx.fillRect(0, 0, size, size);
+        ctx.strokeStyle = colors.border;
+        ctx.lineWidth = Math.max(2, Math.round(size / 16));
+        ctx.strokeRect(ctx.lineWidth / 2, ctx.lineWidth / 2, size - ctx.lineWidth, size - ctx.lineWidth);
+        ctx.fillStyle = colors.text;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.font = `${Math.round(size * 0.55)}px system-ui, sans-serif`;
+        ctx.fillText(letter, size / 2, Math.round(size * 0.56));
+        const dataUrl = canvas.toDataURL('image/png').split(',')[1];
+        zip.file(spec.path, dataUrl, { base64: true });
+        existingPaths.add(spec.path);
+      }
+    }
+  }
+
+  // Fallback: if still no icon assets at all, create the standard set under icons/
+  if (opts.addIconsIfMissing && !anyIconAssetPresent()) {
+    const colors = opts.colors || { bg: '#121a34', border: '#7aa2f7', text: '#e6e9f2' };
+    const icons = await generateIconsBase64WithColors(opts.name || 'X', colors);
+    for (const size of [16, 32, 48, 128] as const) {
+      const path = `icons/${size}.png`;
+      if (!existingPaths.has(path)) {
+        zip.file(path, icons[size], { base64: true });
+        existingPaths.add(path);
+      }
+    }
+  }
+
+  const base = (opts.downloadName ||
+    (opts.name || 'ai-extension')
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]+/g, '-')
+  ).replace(/-+/g, '-');
+
+  const versionSegment = opts.version ? `-${opts.version}` : '';
+
+  const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${base}${versionSegment}-ai.zip`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
