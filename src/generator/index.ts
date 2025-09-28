@@ -53,10 +53,10 @@ function composeManifest(opts: GenerateOptions) {
     description,
     version,
     icons: {
-      16: 'icons/16.png',
-      32: 'icons/32.png',
-      48: 'icons/48.png',
-      128: 'icons/128.png',
+      16: 'icon.png',
+      32: 'icon.png',
+      48: 'icon.png',
+      128: 'icon.png',
     },
   };
 
@@ -64,6 +64,7 @@ function composeManifest(opts: GenerateOptions) {
     manifest.action = {
       default_title: name,
       default_popup: 'popup.html',
+      default_icon: 'icon.png',
     };
   }
 
@@ -357,10 +358,9 @@ export async function generateZip(opts: GenerateOptions): Promise<void> {
     const colors = opts.icons?.colors || { bg: '#121a34', border: '#7aa2f7', text: '#e6e9f2' };
     icons = await generateIconsBase64WithColors(opts.name, colors);
   }
-  for (const size of [16, 32, 48, 128] as const) {
-    zip.file(`icons/${size}.png`, icons[size], { base64: true });
-  }
 
+// Save a single high-res image; 128px is a good default
+zip.file('icon.png', icons[128], { base64: true });
   const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -463,16 +463,49 @@ export async function generateZipFromFiles(
     }
   }
 
-  // Fallback: if still no icon assets at all, create the standard set under icons/
+  // Fallback: if still no icon assets at all, create a single icon.png
   if (opts.addIconsIfMissing && !anyIconAssetPresent()) {
     const colors = opts.colors || { bg: '#121a34', border: '#7aa2f7', text: '#e6e9f2' };
     const icons = await generateIconsBase64WithColors(opts.name || 'X', colors);
-    for (const size of [16, 32, 48, 128] as const) {
-      const path = `icons/${size}.png`;
-      if (!existingPaths.has(path)) {
-        zip.file(path, icons[size], { base64: true });
-        existingPaths.add(path);
+    // Use 128px as the single icon size
+    const path = 'icon.png';
+    if (!existingPaths.has(path)) {
+      zip.file(path, icons[128], { base64: true });
+      existingPaths.add(path);
+    }
+  }
+
+  // Fix manifest icon paths to use single icon.png
+  if (opts.addIconsIfMissing) {
+    try {
+      const manifestFile = files.find(f => f.path === 'manifest.json');
+      if (manifestFile) {
+        const manifestJson = JSON.parse(manifestFile.content);
+        let manifestUpdated = false;
+        
+        // Fix icons section
+        if (manifestJson.icons) {
+          manifestJson.icons = {
+            16: 'icon.png',
+            32: 'icon.png', 
+            48: 'icon.png',
+            128: 'icon.png'
+          };
+          manifestUpdated = true;
+        }
+        
+        // Fix action default_icon
+        if (manifestJson.action && manifestJson.action.default_icon) {
+          manifestJson.action.default_icon = 'icon.png';
+          manifestUpdated = true;
+        }
+        
+        if (manifestUpdated) {
+          zip.file('manifest.json', JSON.stringify(manifestJson, null, 2));
+        }
       }
+    } catch {
+      // swallow JSON errors; we only do best-effort fixing
     }
   }
 
