@@ -65,8 +65,11 @@ http://*/*</textarea>
           <label>
             Model
             <select id="ai-model">
-              <option value="gpt-4o-mini" selected>gpt-4o-mini</option>
+              <option value="auto" selected>Auto / Best</option>
+              <option value="gpt-5">gpt-5</option>
+              <option value="gpt-4.1">gpt-4.1</option>
               <option value="gpt-4o">gpt-4o</option>
+              <option value="gpt-4o-mini">gpt-4o-mini</option>
             </select>
           </label>
           <label style="display:flex;align-items:center;gap:6px;">
@@ -74,13 +77,13 @@ http://*/*</textarea>
             <input id="ai-temp" type="range" min="0" max="1" step="0.05" value="0.4" style="flex:1;" />
             <span id="ai-temp-val" style="min-width:32px;text-align:right;">0.4</span>
           </label>
-          <div class="row" style="grid-template-columns:1fr 1fr 1fr;">
+          <div class="row" style="grid-template-columns:1fr 1fr;">
             <button id="ai-plan" type="button">AI Plan</button>
             <button id="ai-generate" type="button" disabled>AI Generate</button>
-            <button id="ai-download" type="button" disabled>Download AI ZIP</button>
           </div>
-          <div class="row" style="grid-template-columns:1fr; margin-top:6px;">
-            <button id="ai-simulate" type="button">Simulate in this page</button>
+          <div class="row" style="grid-template-columns:1fr 1fr; margin-top:8px;">
+            <button id="ai-simulate" type="button" disabled>Simulate</button>
+            <button id="ai-download" type="button" disabled>Download ZIP</button>
           </div>
           <div id="ai-status" style="margin-top:8px;font-size:12px;color:var(--muted);"></div>
             <button id="ai-retry" type="button" disabled style="margin-top:6px;display:none;">Retry Last</button>
@@ -123,9 +126,7 @@ http://*/*</textarea>
           <div id="icon-preview" class="icon-preview" style="margin-top:8px;"></div>
         </div>
 
-        <div class="actions">
-          <button id="generateBtn" type="submit">Generate ZIP</button>
-        </div>
+        <!-- Removed redundant Generate ZIP button -->
       </form>
 
       <footer class="note">

@@ -163,72 +163,7 @@ document.addEventListener('DOMContentLoaded', () => {
   syncUI();
   renderPreview();
 
-  form.addEventListener('submit', async (e) => {
-    e.preventDefault();
-
-    const name = ( $('name') as HTMLInputElement ).value.trim();
-    const description = ( $('description') as HTMLTextAreaElement ).value.trim();
-    const version = ( $('version') as HTMLInputElement ).value.trim();
-    const author = ( $('author') as HTMLInputElement ).value.trim();
-    const yearInput = ( $('year') as HTMLInputElement ).value.trim();
-    const year = yearInput || String(new Date().getFullYear());
-
-    const featPopup = ( $('feat-popup') as HTMLInputElement ).checked;
-    const featBg = ( $('feat-bg') as HTMLInputElement ).checked;
-    const featCs = ( $('feat-cs') as HTMLInputElement ).checked;
-    const featOptions = ( $('feat-options') as HTMLInputElement ).checked;
-    const featSidePanel = ( $('feat-sidepanel') as HTMLInputElement ).checked;
-
-    const matches = parseMatches( ( $('matches') as HTMLTextAreaElement ).value );
-    const prompt = ( $('prompt') as HTMLTextAreaElement ).value.trim();
-
-    if (!name) {
-      alert('Name is required');
-      return;
-    }
-    if (!/^\d+\.\d+\.\d+(-[\w.-]+)?$/.test(version)) {
-      alert('Version must be semver, e.g. 0.1.0');
-      return;
-    }
-    if (featCs && matches.length === 0) {
-      alert('Provide at least one match pattern for the content script.');
-      return;
-    }
-
-    const iconsOpt =
-      modeUpload.checked && uploadDataUrl
-        ? { mode: 'upload' as const, uploadDataUrl }
-        : { mode: 'auto' as const, colors: { bg: inpBg.value, border: inpBorder.value, text: inpText.value } };
-
-    btn.disabled = true;
-    btn.textContent = 'Generating...';
-
-    try {
-      await generateZip({
-        name,
-        description,
-        version,
-        author,
-        year,
-        features: {
-          popup: featPopup,
-          background: featBg,
-          contentScript: featCs,
-          optionsPage: featOptions,
-          sidePanel: featSidePanel,
-        },
-        matches,
-        prompt,
-        icons: iconsOpt,
-      });
-    } catch (err) {
-      console.error(err);
-      alert('Failed to generate ZIP. See console for details.');
-    } finally {
-      btn.disabled = false;
-      btn.textContent = 'Generate ZIP';
-    }
-  });
+  // Removed form submit handler - no longer needed with AI workflow
 
   /* ================= AI (Server Proxy) Section ================= */
   const aiModelSel = document.getElementById('ai-model') as HTMLSelectElement | null;
@@ -261,6 +196,7 @@ document.addEventListener('DOMContentLoaded', () => {
   let generatedFiles: AIGeneratedFile[] = [];
   let lastPhase: 'plan' | 'generate' | null = null;
   let feedbackNotes: string = '';
+  let lastPrompt: string = '';
  
   // Local dev proxy base (replace with deployed Vercel base when ready)
   const API_BASE = 'http://localhost:3000';
@@ -369,9 +305,19 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   async function postPhase(phase: 'plan' | 'generate', extra: any = {}) {
+    // Use last prompt if files exist (feedback mode), otherwise use current prompt
+    const currentPromptValue = ( $('prompt') as HTMLTextAreaElement )?.value || '';
+    const prompt = generatedFiles.length > 0 ? lastPrompt : currentPromptValue;
+    
+    console.log('Using prompt:', prompt?.slice(0, 100) + '...', 'Files exist:', generatedFiles.length > 0);
+    
+    if (!prompt.trim()) {
+      throw new Error('Prompt is required. Please enter a description of what you want the extension to do.');
+    }
+    
     const payload: any = {
       phase,
-      prompt: ( $('prompt') as HTMLTextAreaElement )?.value || '',
+      prompt,
       features: {
         popup: ( $('feat-popup') as HTMLInputElement )?.checked || false,
         background: ( $('feat-bg') as HTMLInputElement )?.checked || false,
@@ -380,7 +326,17 @@ document.addEventListener('DOMContentLoaded', () => {
         sidePanel: ( $('feat-sidepanel') as HTMLInputElement )?.checked || false,
       },
       matches: parseMatches( ( $('matches') as HTMLTextAreaElement )?.value || '' ),
-      model: aiModelSel?.value || 'gpt-4o-mini',
+      model: (() => {
+        const selected = aiModelSel?.value || 'auto';
+        if (selected === 'auto') {
+          // Priority order: gpt-5, gpt-4.1, gpt-4o, gpt-4o-mini
+          if (aiModelSel?.querySelector('option[value="gpt-5"]')) return 'gpt-5';
+          if (aiModelSel?.querySelector('option[value="gpt-4.1"]')) return 'gpt-4.1';
+          if (aiModelSel?.querySelector('option[value="gpt-4o"]')) return 'gpt-4o';
+          return 'gpt-4o-mini';
+        }
+        return selected;
+      })(),
       temperature: aiTempRange ? Number(aiTempRange.value) : 0.4,
       ...extra
     };
@@ -402,8 +358,18 @@ document.addEventListener('DOMContentLoaded', () => {
     aiPlanBtn.disabled = true;
     aiGenBtn && (aiGenBtn.disabled = true);
     aiDlBtn && (aiDlBtn.disabled = true);
+    aiSimBtn && (aiSimBtn.disabled = true);
     if (aiRetryBtn) { aiRetryBtn.disabled = true; aiRetryBtn.style.display = 'none'; }
     lastPhase = 'plan';
+    
+    // Store current prompt for feedback mode (always store if prompt field has content)
+    const currentPrompt = ( $('prompt') as HTMLTextAreaElement )?.value || '';
+    if (currentPrompt.trim()) {
+      lastPrompt = currentPrompt;
+      // Persist the prompt
+      localStorage.setItem('crxgen.lastPrompt', currentPrompt);
+    }
+    
     setAIStatus('Planning...');
     aiPlanFilesBox && (aiPlanFilesBox.innerHTML = '');
     try {
@@ -424,6 +390,7 @@ document.addEventListener('DOMContentLoaded', () => {
     aiGenBtn.disabled = true;
     aiPlanBtn && (aiPlanBtn.disabled = true);
     aiDlBtn && (aiDlBtn.disabled = true);
+    aiSimBtn && (aiSimBtn.disabled = true);
     if (aiRetryBtn) { aiRetryBtn.disabled = true; aiRetryBtn.style.display = 'none'; }
     lastPhase = 'generate';
     setAIStatus('Generating files...');
@@ -440,6 +407,7 @@ document.addEventListener('DOMContentLoaded', () => {
       } catch {}
       setAIStatus('Files generated.');
       aiDlBtn && (aiDlBtn.disabled = false);
+      aiSimBtn && (aiSimBtn.disabled = false);
     } catch (e: any) {
       setAIStatus(`Generate failed: ${e.message}`, true);
     } finally {
@@ -593,12 +561,13 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   async function handleSimulate() {
-    if (!aiSimBtn) return;
+    if (!aiSimBtn || !generatedFiles.length) return;
     aiSimBtn.disabled = true;
     setAIStatus('Simulating...');
     if (aiSimLogs) { aiSimLogs.innerHTML = ''; aiSimLogs.style.display = 'block'; }
     try {
       const code = extractContentScriptFromGenerated();
+      console.log('Generated code to simulate:', code?.slice(0, 200) + '...');
       if (code) {
         // Prefer real tab injection if available
         const c: any = (window as any).chrome;
@@ -649,8 +618,9 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       } else {
         // No generated files or no JS present; run demo
+        console.log('No content script found, running demo');
         simulateDemoHelloWorld();
-        setAIStatus('Demo simulated.');
+        setAIStatus('Demo simulated (no content script found).');
         if (aiFeedbackBox) aiFeedbackBox.style.display = 'block';
       }
     } catch (e: any) {
@@ -679,10 +649,20 @@ document.addEventListener('DOMContentLoaded', () => {
         if (within && Array.isArray(obj.files)) {
           generatedFiles = obj.files;
           renderGeneratedFiles();
+          // Enable buttons when files are loaded
+          aiDlBtn && (aiDlBtn.disabled = false);
+          aiSimBtn && (aiSimBtn.disabled = false);
         } else {
           // Expire old cache
           localStorage.removeItem(key);
         }
+      }
+      
+      // Also load last prompt
+      const promptKey = 'crxgen.lastPrompt';
+      const savedPrompt = localStorage.getItem(promptKey);
+      if (savedPrompt) {
+        lastPrompt = savedPrompt;
       }
     } catch {}
   }
