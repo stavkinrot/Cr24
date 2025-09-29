@@ -237,6 +237,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const aiPlanBtn = document.getElementById('ai-plan') as HTMLButtonElement | null;
   const aiGenBtn = document.getElementById('ai-generate') as HTMLButtonElement | null;
   const aiDlBtn = document.getElementById('ai-download') as HTMLButtonElement | null;
+  const aiSimBtn = document.getElementById('ai-simulate') as HTMLButtonElement | null;
   const aiRetryBtn = document.getElementById('ai-retry') as HTMLButtonElement | null;
   const aiStatus = document.getElementById('ai-status') as HTMLDivElement | null;
   const aiPlanFilesBox = document.getElementById('ai-plan-files') as HTMLDivElement | null;
@@ -459,12 +460,125 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
+  /* ================= Simulator ================= */
+  type ChromeAPIs = Partial<typeof chrome> | any;
+
+  function createChromeStubs(): ChromeAPIs {
+    const listeners: Record<string, Function[]> = {};
+    const on = (key: string) => ({
+      addListener: (fn: Function) => {
+        (listeners[key] ||= []).push(fn);
+      }
+    });
+    const runtimeId = 'simulated-extension';
+    return {
+      runtime: {
+        id: runtimeId,
+        getURL: (path: string) => new URL(path, location.href).toString(),
+        onMessage: on('runtime.onMessage'),
+        sendMessage: (msg: any) => {
+          (listeners['runtime.onMessage'] || []).forEach(fn => {
+            try { fn(msg, { id: runtimeId }, () => {}); } catch {}
+          });
+        }
+      },
+      storage: {
+        local: {
+          _data: {} as Record<string, any>,
+          get: (keys?: any, cb?: (items: any) => void) => {
+            const result = keys ? Object.fromEntries(Object.keys(keys).map(k => [k, (chrome as any)?.storage?.local?._data?.[k]])) : (chrome as any)?.storage?.local?._data || {};
+            cb && cb(result);
+            return Promise.resolve(result);
+          },
+          set: (items: any, cb?: () => void) => {
+            Object.assign((chrome as any).storage.local._data, items);
+            cb && cb();
+            return Promise.resolve();
+          }
+        }
+      },
+      tabs: {
+        create: ({ url }: { url: string }) => { window.open(url, '_blank'); }
+      }
+    } as any;
+  }
+
+  function runInIsolatedEval(sourceCode: string): void {
+    const sandbox = document.createElement('iframe');
+    sandbox.style.display = 'none';
+    document.body.appendChild(sandbox);
+    const win = sandbox.contentWindow as any;
+    // Provide minimal stubs
+    (win as any).chrome = createChromeStubs();
+    (win as any).globalThis.chrome = (win as any).chrome;
+    const script = win.document.createElement('script');
+    script.textContent = sourceCode;
+    win.document.documentElement.appendChild(script);
+    // Cleanup shortly after execution
+    setTimeout(() => sandbox.remove(), 2000);
+  }
+
+  function navigateCurrentTab(url: string): void {
+    const c: any = (window as any).chrome;
+    if (c && c.tabs && typeof c.tabs.query === 'function' && typeof c.tabs.update === 'function') {
+      try {
+        c.tabs.query({ active: true, currentWindow: true }, (tabs: any[]) => {
+          const tabId = tabs && tabs[0] && tabs[0].id;
+          if (tabId != null) {
+            c.tabs.update(tabId, { url });
+          } else {
+            window.location.assign(url);
+          }
+        });
+        return;
+      } catch {}
+    }
+    // Fallback: navigate this page
+    window.location.assign(url);
+  }
+
+  function extractContentScriptFromGenerated(): string | null {
+    // Prefer explicit content_script.js or files declared in plan purpose
+    const byPath = generatedFiles.find(f => /content_script\.js$/.test(f.path) && f.included);
+    if (byPath) return byPath.content;
+    // Heuristic: any js file with 'Content script' marker
+    const byMarker = generatedFiles.find(f => /\.js$/.test(f.path) && /Content script/i.test(f.content) && f.included);
+    return byMarker ? byMarker.content : null;
+  }
+
+  function simulateDemoHelloWorld(): void {
+    // Simple demo: open Google search for "hello world"
+    const url = 'https://www.google.com/search?q=' + encodeURIComponent('hello world');
+    navigateCurrentTab(url);
+  }
+
+  async function handleSimulate() {
+    if (!aiSimBtn) return;
+    aiSimBtn.disabled = true;
+    setAIStatus('Simulating...');
+    try {
+      const cs = extractContentScriptFromGenerated();
+      if (cs) {
+        runInIsolatedEval(cs);
+        setAIStatus('Content script simulated.');
+      } else {
+        simulateDemoHelloWorld();
+        setAIStatus('Demo simulated.');
+      }
+    } catch (e: any) {
+      setAIStatus(`Simulation failed: ${e.message}`, true);
+    } finally {
+      aiSimBtn.disabled = false;
+    }
+  }
+
   aiTempRange?.addEventListener('input', () => {
     if (aiTempVal) aiTempVal.textContent = aiTempRange.value;
   });
   aiPlanBtn?.addEventListener('click', handlePlan);
   aiGenBtn?.addEventListener('click', handleGenerate);
   aiDlBtn?.addEventListener('click', handleDownloadAI);
+  aiSimBtn?.addEventListener('click', handleSimulate);
   aiRetryBtn?.addEventListener('click', () => {
     if (lastPhase === 'plan') handlePlan();
     else if (lastPhase === 'generate') handleGenerate();
