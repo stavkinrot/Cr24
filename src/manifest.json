@@ -18,5 +18,13 @@
       "32": "icons/32.png",
       "48": "icons/48.png"
     }
-  }
+  },
+  "permissions": [
+    "activeTab",
+    "scripting"
+  ],
+  "host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ]
 }

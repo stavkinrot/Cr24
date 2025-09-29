@@ -242,6 +242,10 @@ document.addEventListener('DOMContentLoaded', () => {
   const aiStatus = document.getElementById('ai-status') as HTMLDivElement | null;
   const aiPlanFilesBox = document.getElementById('ai-plan-files') as HTMLDivElement | null;
   const aiFilesReviewBox = document.getElementById('ai-files-review') as HTMLDivElement | null;
+  const aiSimLogs = document.getElementById('ai-sim-logs') as HTMLDivElement | null;
+  const aiFeedbackBox = document.getElementById('ai-feedback-box') as HTMLDivElement | null;
+  const aiFeedback = document.getElementById('ai-feedback') as HTMLTextAreaElement | null;
+  const aiApplyFeedback = document.getElementById('ai-apply-feedback') as HTMLButtonElement | null;
 
   type AIPlan = {
     planVersion: number;
@@ -256,6 +260,7 @@ document.addEventListener('DOMContentLoaded', () => {
   let currentPlan: AIPlan = null;
   let generatedFiles: AIGeneratedFile[] = [];
   let lastPhase: 'plan' | 'generate' | null = null;
+  let feedbackNotes: string = '';
  
   // Local dev proxy base (replace with deployed Vercel base when ready)
   const API_BASE = 'http://localhost:3000';
@@ -427,6 +432,12 @@ document.addEventListener('DOMContentLoaded', () => {
       const data = await postPhase('generate', { plan: currentPlan });
       generatedFiles = (data.files || []).map((f: any) => ({ ...f, included: true }));
       renderGeneratedFiles();
+      // Persist immediately with timestamp for short-term restore
+      try {
+        const key = 'crxgen.generatedFiles';
+        const payload = { ts: Date.now(), files: generatedFiles };
+        localStorage.setItem(key, JSON.stringify(payload));
+      } catch {}
       setAIStatus('Files generated.');
       aiDlBtn && (aiDlBtn.disabled = false);
     } catch (e: any) {
@@ -471,7 +482,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
     const runtimeId = 'simulated-extension';
-    return {
+    const api = {
       runtime: {
         id: runtimeId,
         getURL: (path: string) => new URL(path, location.href).toString(),
@@ -498,24 +509,35 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       },
       tabs: {
-        create: ({ url }: { url: string }) => { window.open(url, '_blank'); }
+        create: ({ url }: { url: string }) => {
+          try { (window as any).parent?._crxSimNav?.(url); }
+          catch { /* noop */ }
+        },
+        query: (_q: any, cb: Function) => cb([{ id: 0 }]),
+        update: (_id: number, { url }: { url: string }) => {
+          try { (window as any).parent?._crxSimNav?.(url); }
+          catch { /* noop */ }
+        }
       }
     } as any;
+    // Allow content script to post back logs
+    (api as any)._log = (type: 'log'|'error', payload: any) => {
+      if (aiSimLogs) {
+        aiSimLogs.style.display = 'block';
+        const line = document.createElement('div');
+        line.style.whiteSpace = 'pre-wrap';
+        line.style.color = type === 'error' ? 'var(--danger,#d33)' : 'inherit';
+        line.textContent = typeof payload === 'string' ? payload : JSON.stringify(payload);
+        aiSimLogs.appendChild(line);
+        aiSimLogs.scrollTop = aiSimLogs.scrollHeight;
+      }
+    };
+    return api;
   }
 
-  function runInIsolatedEval(sourceCode: string): void {
-    const sandbox = document.createElement('iframe');
-    sandbox.style.display = 'none';
-    document.body.appendChild(sandbox);
-    const win = sandbox.contentWindow as any;
-    // Provide minimal stubs
-    (win as any).chrome = createChromeStubs();
-    (win as any).globalThis.chrome = (win as any).chrome;
-    const script = win.document.createElement('script');
-    script.textContent = sourceCode;
-    win.document.documentElement.appendChild(script);
-    // Cleanup shortly after execution
-    setTimeout(() => sandbox.remove(), 2000);
+  // Disabled sandbox path to avoid MV3 page CSP issues; rely on chrome.scripting injection only
+  function runInIsolatedEval(_sourceCode: string): void {
+    setAIStatus('Simulation fallback disabled due to CSP. Please run from a Chrome extension popup with scripting permission.', true);
   }
 
   function navigateCurrentTab(url: string): void {
@@ -538,12 +560,30 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function extractContentScriptFromGenerated(): string | null {
-    // Prefer explicit content_script.js or files declared in plan purpose
-    const byPath = generatedFiles.find(f => /content_script\.js$/.test(f.path) && f.included);
+    // 1) Try manifest.json content_scripts
+    try {
+      const manifestFile = generatedFiles.find(f => f.path === 'manifest.json' && f.included);
+      if (manifestFile) {
+        const mf = JSON.parse(manifestFile.content);
+        const scripts: string[] = [];
+        const list = Array.isArray(mf.content_scripts) ? mf.content_scripts : [];
+        for (const entry of list) {
+          const jsArr = Array.isArray(entry.js) ? entry.js : [];
+          for (const p of jsArr) {
+            const file = generatedFiles.find(f => f.path === p && f.included);
+            if (file) scripts.push(file.content);
+          }
+        }
+        if (scripts.length) return scripts.join('\n;\n');
+      }
+    } catch {}
+    // 2) Fallback: explicit content_script.js
+    const byPath = generatedFiles.find(f => /content_script\.js$/i.test(f.path) && f.included);
     if (byPath) return byPath.content;
-    // Heuristic: any js file with 'Content script' marker
-    const byMarker = generatedFiles.find(f => /\.js$/.test(f.path) && /Content script/i.test(f.content) && f.included);
-    return byMarker ? byMarker.content : null;
+    // 3) Fallback: any included .js files concatenated
+    const anyJs = generatedFiles.filter(f => /\.js$/i.test(f.path) && f.included);
+    if (anyJs.length) return anyJs.map(f => f.content).join('\n;\n');
+    return null;
   }
 
   function simulateDemoHelloWorld(): void {
@@ -556,14 +596,62 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!aiSimBtn) return;
     aiSimBtn.disabled = true;
     setAIStatus('Simulating...');
+    if (aiSimLogs) { aiSimLogs.innerHTML = ''; aiSimLogs.style.display = 'block'; }
     try {
-      const cs = extractContentScriptFromGenerated();
-      if (cs) {
-        runInIsolatedEval(cs);
-        setAIStatus('Content script simulated.');
+      const code = extractContentScriptFromGenerated();
+      if (code) {
+        // Prefer real tab injection if available
+        const c: any = (window as any).chrome;
+        if (c && c.scripting && typeof c.tabs?.query === 'function') {
+          c.tabs.query({ active: true, currentWindow: true }, (tabs: any[]) => {
+            const tabId = tabs && tabs[0] && tabs[0].id;
+            if (tabId == null) {
+              setAIStatus('No active tab found for injection.', true);
+              if (aiFeedbackBox) aiFeedbackBox.style.display = 'block';
+              return;
+            }
+            // Use MAIN world injection to avoid CSP issues in isolated world
+            c.scripting.executeScript({
+              target: { tabId },
+              world: 'MAIN',
+              args: [code],
+              func: (codeStr: string) => {
+                try {
+                  // Install logging hooks that forward to popup via runtime.sendMessage
+                  try {
+                    const __origLog = console.log; const __origErr = console.error;
+                    console.log = function(...args: any[]){ try { chrome.runtime.sendMessage({type:'sim-log', level:'log', args:args.map(a=>''+a)}); } catch(_){}; return (__origLog as any).apply(console, args as any); } as any;
+                    console.error = function(...args: any[]){ try { chrome.runtime.sendMessage({type:'sim-log', level:'error', args:args.map(a=>''+a)}); } catch(_){}; return (__origErr as any).apply(console, args as any); } as any;
+                  } catch(_) {}
+                  
+                  // Execute in main world where CSP is more permissive for extension scripts
+                  const script = document.createElement('script');
+                  script.textContent = codeStr;
+                  document.documentElement.appendChild(script);
+                  script.remove();
+                } catch (e) {
+                  try { console.error((e as any)?.stack || String(e)); } catch(_){ }
+                }
+              }
+            }, () => {
+              const lastError = c.runtime && c.runtime.lastError && c.runtime.lastError.message;
+              if (lastError) {
+                setAIStatus(`Injection failed: ${lastError}`, true);
+              } else {
+                setAIStatus('Content script simulated (in page).');
+              }
+              if (aiFeedbackBox) aiFeedbackBox.style.display = 'block';
+            });
+          });
+        } else {
+          setAIStatus('Simulation requires Chrome extension environment (scripting API).', true);
+          if (aiFeedbackBox) aiFeedbackBox.style.display = 'block';
+        }
       } else {
+        // No generated files or no JS present; run demo
         simulateDemoHelloWorld();
         setAIStatus('Demo simulated.');
+        if (aiFeedbackBox) aiFeedbackBox.style.display = 'block';
       }
     } catch (e: any) {
       setAIStatus(`Simulation failed: ${e.message}`, true);
@@ -571,6 +659,43 @@ document.addEventListener('DOMContentLoaded', () => {
       aiSimBtn.disabled = false;
     }
   }
+
+  function persistGeneratedFiles() {
+    try {
+      const key = 'crxgen.generatedFiles';
+      const payload = { ts: Date.now(), files: generatedFiles.map(f => ({ path: f.path, content: f.content, included: f.included })) };
+      localStorage.setItem(key, JSON.stringify(payload));
+    } catch {}
+  }
+
+  function loadPersistedGeneratedFiles() {
+    try {
+      const key = 'crxgen.generatedFiles';
+      const raw = localStorage.getItem(key);
+      if (raw) {
+        const obj = JSON.parse(raw);
+        const now = Date.now();
+        const within = obj && typeof obj.ts === 'number' && (now - obj.ts) <= 3 * 60 * 1000; // 3 minutes
+        if (within && Array.isArray(obj.files)) {
+          generatedFiles = obj.files;
+          renderGeneratedFiles();
+        } else {
+          // Expire old cache
+          localStorage.removeItem(key);
+        }
+      }
+    } catch {}
+  }
+
+  aiApplyFeedback?.addEventListener('click', () => {
+    const note = (aiFeedback?.value || '').trim();
+    if (!note) { alert('Please enter feedback.'); return; }
+    feedbackNotes = note;
+    // Save for later send with plan/generate
+    localStorage.setItem('crxgen.feedbackNotes', feedbackNotes);
+    persistGeneratedFiles();
+    setAIStatus('Feedback saved. You can re-run Plan/Generate to apply changes.');
+  });
 
   aiTempRange?.addEventListener('input', () => {
     if (aiTempVal) aiTempVal.textContent = aiTempRange.value;
@@ -583,5 +708,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (lastPhase === 'plan') handlePlan();
     else if (lastPhase === 'generate') handleGenerate();
   });
+
+  // Restore previous session
+  loadPersistedGeneratedFiles();
 
 });

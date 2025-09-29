@@ -86,6 +86,14 @@ http://*/*</textarea>
             <button id="ai-retry" type="button" disabled style="margin-top:6px;display:none;">Retry Last</button>
           <div id="ai-plan-files" style="margin-top:8px;max-height:140px;overflow:auto;"></div>
           <div id="ai-files-review" style="margin-top:8px;max-height:200px;overflow:auto;display:none;"></div>
+          <div id="ai-sim-logs" style="margin-top:8px;max-height:160px;overflow:auto;border:1px solid var(--border,#333);border-radius:4px;padding:6px;display:none;font-size:12px;"></div>
+          <div style="margin-top:8px;display:none;" id="ai-feedback-box">
+            <label style="display:block;margin-bottom:4px;">Feedback for the generator</label>
+            <textarea id="ai-feedback" rows="3" placeholder="Describe errors or desired changes"></textarea>
+            <div class="row" style="grid-template-columns:1fr; margin-top:6px;">
+              <button id="ai-apply-feedback" type="button">Apply feedback</button>
+            </div>
+          </div>
         </div>
         <h2 class="section-title">Icons</h2>
         <div class="card">
