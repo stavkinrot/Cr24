@@ -8,6 +8,8 @@
   --border: #243055;
   --input-bg: #0e1530;
   --input-text: #e6e9f2;
+  --success: #28c281;
+  --danger: #e35d6a;
 }
 
 :root[data-theme="light"] {
@@ -20,108 +22,142 @@
   --border: #d9e0ea;
   --input-bg: #ffffff;
   --input-text: #0c1220;
+  --success: #1a9e6a;
+  --danger: #c73f51;
 }
 
 * { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); font: 13px/1.4 system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Arial; }
 
-html, body {
-  margin: 0;
-  padding: 0;
-  background: var(--bg);
-  color: var(--text);
-  font: 13px/1.4 system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Arial, "Apple Color Emoji", "Segoe UI Emoji";
-}
+/* ===== App chrome ===== */
+.chat-body { min-width: 340px; }
+.chat-container { width: 360px; min-height: 520px; max-height: 640px; display: grid; grid-template-rows: auto 1fr auto; gap: 8px; padding: 10px; }
 
-.container {
-  width: 340px;
-  padding: 12px;
-}
+.appbar { display: flex; align-items: center; justify-content: space-between; }
+.appbar h1 { margin: 0; font-size: 16px; }
+.appbar-actions { display: flex; gap: 6px; }
 
-/* App bar */
-.appbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin: 2px 0 10px;
-}
-
-h1 {
-  margin: 0;
-  font-size: 16px;
-}
-
-/* Section headers OUTSIDE the framed card */
-.section-title {
-  margin: 12px 0 6px;
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.3px;
-  text-transform: uppercase;
-}
-
-/* Framed card that holds the inputs (no legend inside) */
-.card {
+/* ===== Messages ===== */
+.messages {
   border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 10px;
   background: var(--panel);
+  border-radius: 10px;
+  padding: 10px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  scroll-behavior: smooth;
+  min-height: 360px;
 }
 
-/* Forms */
-label {
-  display: block;
-  margin: 8px 0;
+/* Bubbles */
+.bubble { display: flex; }
+.bubble.left   { justify-content: flex-start; }
+.bubble.right  { justify-content: flex-end; }
+
+.bubble-inner {
+  max-width: 82%;
+  padding: 8px 10px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: #0e1530;
+}
+:root[data-theme="light"] .bubble-inner { background: #f1f4fb; }
+
+.bubble.left  .bubble-inner { border-top-left-radius: 4px; }
+.bubble.right .bubble-inner { border-top-right-radius: 4px; background: rgba(122,162,247,0.12); }
+
+.muted { color: var(--muted); }
+.success { color: var(--success); }
+.error { color: var(--danger); }
+.thinking { color: var(--muted); font-style: italic; }
+
+/* Assistant attachments (files, etc.) */
+.assistant-attachments { margin-top: 8px; }
+
+/* File list/cards */
+.file-list { display: grid; gap: 8px; margin-top: 6px; }
+.file-card { border: 1px solid var(--border); border-radius: 8px; background: var(--panel); overflow: hidden; }
+.file-card header {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 8px; border-bottom: 1px solid var(--border);
+}
+.file-card .spacer { flex: 1; }
+.file-card pre {
+  margin: 0; padding: 8px; max-height: 220px; overflow: auto;
+  background: var(--bg); color: var(--text); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px;
 }
 
-input[type="text"],
-input[type="number"],
-textarea {
+/* ===== Actions row under assistant messages ===== */
+.actions { display: flex; gap: 8px; margin-top: 8px; }
+button { border: none; border-radius: 8px; padding: 8px 12px; font-weight: 600; cursor: pointer; }
+button:disabled { opacity: .6; cursor: default; }
+
+.primary   { background: var(--accent); color: #fff; }
+.secondary { background: transparent; color: var(--text); border: 1px solid var(--border); }
+.link      { background: transparent; color: var(--accent); padding: 0 6px; }
+.chip      { background: transparent; color: var(--text); border: 1px solid var(--border); border-radius: 999px; padding: 2px 8px; font-size: 12px; }
+
+/* ===== Composer (input bar) ===== */
+.composer {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 8px;
+  align-items: end;
+  position: sticky; bottom: 0;
+}
+
+.icon-button {
+  width: 34px; height: 34px;
+  display: grid; place-items: center;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+}
+
+.composer-input {
+  resize: none;
   width: 100%;
-  padding: 8px;
-  margin-top: 4px;
-  border-radius: 6px;
+  max-height: 180px;
+  min-height: 36px;
+  padding: 8px 10px;
+  border-radius: 8px;
   border: 1px solid var(--border);
   background: var(--input-bg);
   color: var(--input-text);
   outline: none;
 }
 
-.row {
+.popover {
+  position: absolute;
+  bottom: 50px; /* sits above the composer */
+  left: 10px;
+  width: 220px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+  box-shadow: 0 6px 22px rgba(0,0,0,.28);
   display: grid;
-  grid-template-columns: 1fr 110px;
   gap: 8px;
+  z-index: 20;
+}
+.popover[hidden] { display: none; }
+
+.stack { display: grid; gap: 6px; }
+.stack select, .stack input[type="range"] {
+  width: 100%;
+  background: var(--input-bg);
+  color: var(--input-text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px;
 }
 
-.actions {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: 12px;
-}
-
-button {
-  background: var(--accent);
-  color: #ffffff;
-  border: none;
-  border-radius: 6px;
-  padding: 8px 12px;
-  cursor: pointer;
-  font-weight: 600;
-}
-
-button[disabled] {
-  opacity: 0.6;
-  cursor: default;
-}
-
-.note {
-  color: var(--muted);
-  margin-top: 8px;
-  font-size: 12px;
-}
-
-/* Toggle button */
-#themeToggle {
-  line-height: 1;
-  padding: 6px 10px;
-}
+/* Scrollbar (subtle) */
+.messages::-webkit-scrollbar,
+.file-card pre::-webkit-scrollbar { width: 10px; height: 10px; }
+.messages::-webkit-scrollbar-thumb,
+.file-card pre::-webkit-scrollbar-thumb { background: var(--border); border-radius: 10px; }

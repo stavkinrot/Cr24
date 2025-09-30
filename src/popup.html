@@ -2,68 +2,38 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <title>CRX Generator</title>
+    <title>CRX Generator – Chat</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link href="./styles.css" rel="stylesheet" />
   </head>
-  <body>
-    <main class="container">
+  <body class="chat-body">
+    <main class="chat-container">
       <header class="appbar">
-        <h1>Chrome Extension Generator</h1>
-        <button id="themeToggle" type="button" aria-label="Toggle theme">Toggle theme</button>
+        <h1>CRX Generator</h1>
+        <div class="appbar-actions">
+          <button id="themeToggle" type="button" aria-label="Toggle theme">Dark mode</button>
+        </div>
       </header>
 
-      <form id="gen-form">
-        <h2 class="section-title">Project</h2>
-        <div class="card">
-          <label>
-            Name
-            <input id="name" type="text" placeholder="My Extension" required />
-          </label>
-          <label>
-            Description
-            <textarea id="description" rows="2" placeholder="What it does"></textarea>
-          </label>
-          <label>
-            Version
-            <input id="version" type="text" value="0.1.0" required />
-          </label>
-          <div class="row">
-            <label>
-              Author
-              <input id="author" type="text" placeholder="Your Name" />
-            </label>
-            <label>
-              Year
-              <input id="year" type="number" min="2000" max="2100" />
-            </label>
-          </div>
-        </div>
+      <!-- Chat messages -->
+      <section id="messages" class="messages" aria-live="polite" aria-relevant="additions"></section>
 
-        <h2 class="section-title">Features</h2>
-        <div class="card">
-          <label><input id="feat-popup" type="checkbox" checked /> Popup</label>
-          <label><input id="feat-bg" type="checkbox" /> Background</label>
-          <label><input id="feat-cs" type="checkbox" /> Content script</label>
-          <label><input id="feat-options" type="checkbox" /> Options page</label>
-          <label><input id="feat-sidepanel" type="checkbox" /> Side panel</label>
-        </div>
+      <!-- Sticky input bar -->
+      <form id="chat-form" class="composer" autocomplete="off">
+        <button id="modelButton" class="icon-button" type="button" title="Model & settings" aria-haspopup="true" aria-expanded="false">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true">
+            <path d="M19.14 12.94c.04-.31.06-.63.06-.94s-.02-.63-.06-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.61-.22l-2.39.96a7.08 7.08 0 0 0-1.63-.94l-.36-2.54A.5.5 0 0 0 14.3 2h-4.6a.5.5 0 0 0-.5.42l-.36 2.54c-.6.24-1.16.56-1.68.94l-2.39-.96a.5.5 0 0 0-.61.22L2.64 8.48a.5.5 0 0 0 .12.64l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58a.5.5 0 0 0-.12.64l1.92 3.32c.14.24.43.34.69.22l2.39-.96c.51.39 1.08.71 1.68.94l.36 2.54c.04.27.27.46.54.46h4.6c.27 0 .5-.19.54-.46l.36-2.54c.6-.24 1.16-.56 1.68-.94l2.39.96c.26.12.55.02.69-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.03-1.58zM12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7z"/>
+          </svg>
+        </button>
 
-        <h2 class="section-title">Content script matches</h2>
-        <div class="card">
-          <textarea id="matches" rows="3">https://*/*
-http://*/*</textarea>
-        </div>
+        <textarea id="chat-input" class="composer-input" rows="1" placeholder="What would you like your extension to do?" required></textarea>
 
-        <h2 class="section-title">Prompt</h2>
-        <div class="card">
-          <textarea id="prompt" rows="4" placeholder="Describe what the generated extension should do"></textarea>
-        </div>
+        <button id="send" class="primary" type="submit" title="Send">Send</button>
 
-        <h2 class="section-title">AI (Server)</h2>
-        <div class="card" id="ai-section">
-          <label>
-            Model
+        <!-- Model popover -->
+        <div id="model-popover" class="popover" hidden>
+          <label class="stack">
+            <span>Model</span>
             <select id="ai-model">
               <option value="auto" selected>Auto / Best</option>
               <option value="gpt-5">gpt-5</option>
@@ -72,67 +42,15 @@ http://*/*</textarea>
               <option value="gpt-4o-mini">gpt-4o-mini</option>
             </select>
           </label>
-          <label style="display:flex;align-items:center;gap:6px;">
-            Temperature
-            <input id="ai-temp" type="range" min="0" max="1" step="0.05" value="0.4" style="flex:1;" />
-            <span id="ai-temp-val" style="min-width:32px;text-align:right;">0.4</span>
+
+          <label class="stack">
+            <span>Temperature <span id="ai-temp-val">0.4</span></span>
+            <input id="ai-temp" type="range" min="0" max="1" step="0.05" value="0.4" />
           </label>
-          <div class="row" style="grid-template-columns:1fr 1fr;">
-            <button id="ai-plan" type="button">AI Plan</button>
-            <button id="ai-generate" type="button" disabled>AI Generate</button>
-          </div>
-          <div class="row" style="grid-template-columns:1fr 1fr; margin-top:8px;">
-            <button id="ai-simulate" type="button" disabled>Simulate</button>
-            <button id="ai-download" type="button" disabled>Download ZIP</button>
-          </div>
-          <div id="ai-status" style="margin-top:8px;font-size:12px;color:var(--muted);"></div>
-            <button id="ai-retry" type="button" disabled style="margin-top:6px;display:none;">Retry Last</button>
-          <div id="ai-plan-files" style="margin-top:8px;max-height:140px;overflow:auto;"></div>
-          <div id="ai-files-review" style="margin-top:8px;max-height:200px;overflow:auto;display:none;"></div>
-          <div id="ai-sim-logs" style="margin-top:8px;max-height:160px;overflow:auto;border:1px solid var(--border,#333);border-radius:4px;padding:6px;display:none;font-size:12px;"></div>
-          <div style="margin-top:8px;display:none;" id="ai-feedback-box">
-            <label style="display:block;margin-bottom:4px;">Feedback for the generator</label>
-            <textarea id="ai-feedback" rows="3" placeholder="Describe errors or desired changes"></textarea>
-            <div class="row" style="grid-template-columns:1fr; margin-top:6px;">
-              <button id="ai-apply-feedback" type="button">Apply feedback</button>
-            </div>
-          </div>
         </div>
-        <h2 class="section-title">Icons</h2>
-        <div class="card">
-          <div>
-            <label><input type="radio" name="icon-mode" id="icon-mode-auto" checked /> Auto-generate initials</label>
-            <label><input type="radio" name="icon-mode" id="icon-mode-upload" /> Upload logo (PNG/SVG)</label>
-          </div>
-
-          <div id="icon-colors">
-            <div class="row" style="grid-template-columns: 1fr 1fr 1fr;">
-              <label>BG
-                <input id="icon-bg" type="color" value="#121a34" />
-              </label>
-              <label>Border
-                <input id="icon-border" type="color" value="#7aa2f7" />
-              </label>
-              <label>Text
-                <input id="icon-text" type="color" value="#e6e9f2" />
-              </label>
-            </div>
-          </div>
-
-          <div style="margin-top:8px;">
-            <input id="icon-upload" type="file" accept="image/png,image/svg+xml" />
-          </div>
-
-          <div id="icon-preview" class="icon-preview" style="margin-top:8px;"></div>
-        </div>
-
-        <!-- Removed redundant Generate ZIP button -->
       </form>
-
-      <footer class="note">
-        No permissions required. All generation happens locally.
-      </footer>
     </main>
+
     <script type="module" src="./popup.ts"></script>
   </body>
 </html>

@@ -1,41 +1,70 @@
-import { generateZip, generateZipFromFiles } from './generator/index';
+// popup.ts — Chat UI for CRX Generator
+import { generateZipFromFiles } from './generator/index';
 
-function $(id: string) {
-  return document.getElementById(id)!;
-}
-
-function parseMatches(text: string): string[] {
-  return text
-    .split(/\r?\n/)
-    .map((s) => s.trim())
-    .filter(Boolean);
-}
-
+type Role = 'user' | 'assistant';
+type Phase = 'ideate' | 'iterate';
 type Theme = 'light' | 'dark';
 
+type FileEntry = { path: string; content: string; included?: boolean };
+type AIPlan = {
+  planVersion: number;
+  summary: string;
+  features: Record<string, boolean>;
+  files: { path: string; purpose: string }[];
+  risks?: string[];
+} | null;
+
+const API_BASE = 'http://localhost:3000'; // your dev proxy
+
+/* ---------- tiny DOM helpers ---------- */
+const $ = <T extends HTMLElement = HTMLElement>(sel: string) =>
+  document.querySelector(sel) as T;
+const on = (el: Element | Document, ev: string, fn: any) =>
+  el.addEventListener(ev, fn);
+
+/* ---------- theme ---------- */
 function getStoredTheme(): Theme | null {
   const v = localStorage.getItem('theme');
   return v === 'light' || v === 'dark' ? (v as Theme) : null;
 }
-
 function getPreferredTheme(): Theme {
-  return (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) ? 'light' : 'dark';
+  return window.matchMedia?.('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
 }
-
 function applyTheme(theme: Theme) {
   document.documentElement.setAttribute('data-theme', theme);
 }
 
-document.addEventListener('DOMContentLoaded', () => {
-  const form = $('gen-form') as HTMLFormElement;
-  const btn = $('generateBtn') as HTMLButtonElement;
-  const themeToggle = $('themeToggle') as HTMLButtonElement;
+/* ---------- chat state ---------- */
+interface Msg {
+  id: string;
+  role: Role;
+  html: string;              // pre-rendered HTML for content (we manage minimal safe rendering)
+  attachments?: {
+    plan?: AIPlan;
+    files?: FileEntry[];
+  };
+  actions?: {
+    simulate?: boolean;
+    generate?: boolean;
+  };
+}
 
-  // Theme init
+let phase: Phase = 'ideate';
+let messages: Msg[] = [];
+let currentPlan: AIPlan = null;
+let currentFiles: FileEntry[] = [];
+
+let model: string = 'auto';
+let temperature = 0.4;
+
+/* ---------- startup ---------- */
+document.addEventListener('DOMContentLoaded', () => {
+  // Theme
+  const themeToggle = $('#themeToggle') as HTMLButtonElement;
   const initial = getStoredTheme() || getPreferredTheme();
   applyTheme(initial);
   themeToggle.textContent = initial === 'light' ? 'Dark mode' : 'Light mode';
-  themeToggle.addEventListener('click', () => {
+  on(themeToggle, 'click', () => {
     const current = (document.documentElement.getAttribute('data-theme') as Theme) || 'dark';
     const next = current === 'light' ? 'dark' : 'light';
     applyTheme(next);
@@ -43,653 +72,404 @@ document.addEventListener('DOMContentLoaded', () => {
     themeToggle.textContent = next === 'light' ? 'Dark mode' : 'Light mode';
   });
 
-  // Icons UI
-  const modeAuto = $('icon-mode-auto') as HTMLInputElement;
-  const modeUpload = $('icon-mode-upload') as HTMLInputElement;
-  const inpBg = $('icon-bg') as HTMLInputElement;
-  const inpBorder = $('icon-border') as HTMLInputElement;
-  const inpText = $('icon-text') as HTMLInputElement;
-  const inpUpload = $('icon-upload') as HTMLInputElement;
-  const preview = $('icon-preview') as HTMLDivElement;
-
-  let uploadDataUrl: string | null = null;
-
-  function drawInitialIcon(size: number, colors: { bg: string; border: string; text: string }, letter: string): HTMLCanvasElement {
-    const canvas = document.createElement('canvas');
-    canvas.width = size;
-    canvas.height = size;
-    const ctx = canvas.getContext('2d')!;
-    ctx.fillStyle = colors.bg;
-    ctx.fillRect(0, 0, size, size);
-    ctx.strokeStyle = colors.border;
-    ctx.lineWidth = Math.max(2, Math.round(size / 16));
-    ctx.strokeRect(ctx.lineWidth / 2, ctx.lineWidth / 2, size - ctx.lineWidth, size - ctx.lineWidth);
-    ctx.fillStyle = colors.text;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = 'high';
-    ctx.font = `${Math.round(size * 0.55)}px system-ui, sans-serif`;
-    ctx.fillText(letter, size / 2, Math.round(size * 0.56));
-    return canvas;
-  }
-
-  function drawUploadIcon(size: number, dataUrl: string): Promise<HTMLCanvasElement> {
-    return new Promise((resolve, reject) => {
-      const img = new Image();
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        canvas.width = size;
-        canvas.height = size;
-        const ctx = canvas.getContext('2d')!;
-        ctx.clearRect(0, 0, size, size);
-        const scale = Math.min(size / img.width, size / img.height);
-        const dw = Math.round(img.width * scale);
-        const dh = Math.round(img.height * scale);
-        const dx = Math.floor((size - dw) / 2);
-        const dy = Math.floor((size - dh) / 2);
-        ctx.imageSmoothingEnabled = true;
-        ctx.imageSmoothingQuality = 'high';
-        ctx.drawImage(img, dx, dy, dw, dh);
-        resolve(canvas);
-      };
-      img.onerror = (e) => reject(e);
-      img.src = dataUrl;
-    });
-  }
-
-  function clearPreview() {
-    preview.innerHTML = '';
-  }
-
-  async function renderPreview() {
-    clearPreview();
-    const sizes = [16, 32, 48, 128];
-    if (modeUpload.checked && uploadDataUrl) {
-      for (const s of sizes) {
-        const c = await drawUploadIcon(s, uploadDataUrl);
-        c.style.marginRight = '6px';
-        c.title = `${s}x${s}`;
-        preview.appendChild(c);
-      }
-    } else {
-      const colors = { bg: inpBg.value, border: inpBorder.value, text: inpText.value };
-      const letter = ((($('name') as HTMLInputElement).value.trim()[0]) || 'X').toUpperCase();
-      for (const s of sizes) {
-        const c = drawInitialIcon(s, colors, letter);
-        c.style.marginRight = '6px';
-        c.title = `${s}x${s}`;
-        preview.appendChild(c);
-      }
-    }
-  }
-
-  function syncUI() {
-    const auto = modeAuto.checked;
-    inpBg.disabled = !auto;
-    inpBorder.disabled = !auto;
-    inpText.disabled = !auto;
-    inpUpload.disabled = auto;
-  }
-
-  function readFileAsDataURL(file: File): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result));
-      reader.onerror = (e) => reject(e);
-      reader.readAsDataURL(file);
-    });
-  }
-
-  // Wire up icon UI events
-  modeAuto?.addEventListener('change', () => { syncUI(); renderPreview(); });
-  modeUpload?.addEventListener('change', () => { syncUI(); renderPreview(); });
-  inpBg?.addEventListener('input', renderPreview);
-  inpBorder?.addEventListener('input', renderPreview);
-  inpText?.addEventListener('input', renderPreview);
-  inpUpload?.addEventListener('change', async () => {
-    const f = inpUpload.files?.[0];
-    if (!f) return;
-    // Accept SVG/PNG only
-    if (!/image\/(png|svg\+xml)/.test(f.type)) {
-      alert('Please choose a PNG or SVG file.');
-      return;
-    }
-    uploadDataUrl = await readFileAsDataURL(f);
-    await renderPreview();
+  // Persisted model/temperature
+  chrome.storage?.local.get({ crxgen_model: 'auto', crxgen_temp: 0.4 }, (st) => {
+    model = st.crxgen_model;
+    temperature = Number(st.crxgen_temp) || 0.4;
+    const sel = $('#ai-model') as HTMLSelectElement;
+    const rng = $('#ai-temp') as HTMLInputElement;
+    const lbl = $('#ai-temp-val') as HTMLSpanElement;
+    if (sel) sel.value = model;
+    if (rng) rng.value = String(temperature);
+    if (lbl) lbl.textContent = String(temperature);
   });
 
-  // Initial state
-  syncUI();
-  renderPreview();
+  // Model popover
+  const modelBtn = $('#modelButton')!;
+  const popover = $('#model-popover')!;
+  const modelSel = $('#ai-model') as HTMLSelectElement;
+  const tempRange = $('#ai-temp') as HTMLInputElement;
+  const tempVal = $('#ai-temp-val') as HTMLSpanElement;
 
-  // Removed form submit handler - no longer needed with AI workflow
-
-  /* ================= AI (Server Proxy) Section ================= */
-  const aiModelSel = document.getElementById('ai-model') as HTMLSelectElement | null;
-  const aiTempRange = document.getElementById('ai-temp') as HTMLInputElement | null;
-  const aiTempVal = document.getElementById('ai-temp-val') as HTMLSpanElement | null;
-  const aiPlanBtn = document.getElementById('ai-plan') as HTMLButtonElement | null;
-  const aiGenBtn = document.getElementById('ai-generate') as HTMLButtonElement | null;
-  const aiDlBtn = document.getElementById('ai-download') as HTMLButtonElement | null;
-  const aiSimBtn = document.getElementById('ai-simulate') as HTMLButtonElement | null;
-  const aiRetryBtn = document.getElementById('ai-retry') as HTMLButtonElement | null;
-  const aiStatus = document.getElementById('ai-status') as HTMLDivElement | null;
-  const aiPlanFilesBox = document.getElementById('ai-plan-files') as HTMLDivElement | null;
-  const aiFilesReviewBox = document.getElementById('ai-files-review') as HTMLDivElement | null;
-  const aiSimLogs = document.getElementById('ai-sim-logs') as HTMLDivElement | null;
-  const aiFeedbackBox = document.getElementById('ai-feedback-box') as HTMLDivElement | null;
-  const aiFeedback = document.getElementById('ai-feedback') as HTMLTextAreaElement | null;
-  const aiApplyFeedback = document.getElementById('ai-apply-feedback') as HTMLButtonElement | null;
-
-  type AIPlan = {
-    planVersion: number;
-    summary: string;
-    features: Record<string, boolean>;
-    files: { path: string; purpose: string }[];
-    risks?: string[];
-  } | null;
-
-  type AIGeneratedFile = { path: string; content: string; included: boolean };
- 
-  let currentPlan: AIPlan = null;
-  let generatedFiles: AIGeneratedFile[] = [];
-  let lastPhase: 'plan' | 'generate' | null = null;
-  let feedbackNotes: string = '';
-  let lastPrompt: string = '';
- 
-  // Local dev proxy base (replace with deployed Vercel base when ready)
-  const API_BASE = 'http://localhost:3000';
-
-  function setAIStatus(msg: string, isError = false) {
-    if (!aiStatus) return;
-    aiStatus.textContent = msg;
-    aiStatus.style.color = isError ? 'var(--danger, #d33)' : 'var(--muted, #888)';
-    if (aiRetryBtn) {
-      if (isError && lastPhase) {
-        aiRetryBtn.disabled = false;
-        aiRetryBtn.style.display = 'inline-block';
-      } else {
-        aiRetryBtn.disabled = true;
-        aiRetryBtn.style.display = 'none';
-      }
+  on(modelBtn, 'click', () => {
+    const open = popover.hasAttribute('hidden') ? false : true;
+    if (open) popover.setAttribute('hidden', '');
+    else popover.removeAttribute('hidden');
+    modelBtn.setAttribute('aria-expanded', String(!open));
+  });
+  on(document, 'click', (e: MouseEvent) => {
+    if (!popover.contains(e.target as Node) && e.target !== modelBtn) {
+      popover.setAttribute('hidden', '');
+      modelBtn.setAttribute('aria-expanded', 'false');
     }
-  }
+  });
+  on(modelSel, 'change', () => {
+    model = modelSel.value || 'auto';
+    chrome.storage?.local.set({ crxgen_model: model });
+  });
+  on(tempRange, 'input', () => {
+    temperature = Number(tempRange.value);
+    tempVal.textContent = String(temperature);
+    chrome.storage?.local.set({ crxgen_temp: temperature });
+  });
 
-  function renderPlanFiles() {
-    if (!aiPlanFilesBox) return;
-    aiPlanFilesBox.innerHTML = '';
-    if (!currentPlan) return;
-    const ul = document.createElement('ul');
-    ul.style.margin = '0';
-    ul.style.padding = '0 0 0 16px';
-    currentPlan.files.forEach(f => {
-      const li = document.createElement('li');
-      li.style.fontSize = '12px';
-      li.textContent = `${f.path} – ${f.purpose}`;
-      ul.appendChild(li);
+  // Chat form
+  const form = $('#chat-form') as HTMLFormElement;
+  const input = $('#chat-input') as HTMLTextAreaElement;
+  autoResize(input);
+
+  on(form, 'submit', async (e: Event) => {
+    e.preventDefault();
+    const text = input.value.trim();
+    if (!text) return;
+
+    // Show user message
+    pushMessage({
+      role: 'user',
+      html: escapeHtml(text),
     });
-    aiPlanFilesBox.appendChild(ul);
-    if (currentPlan.risks?.length) {
-      const risks = document.createElement('div');
-      risks.style.fontSize = '11px';
-      risks.style.marginTop = '6px';
-      risks.innerHTML = '<strong>Risks:</strong> ' + currentPlan.risks.join('; ');
-      aiPlanFilesBox.appendChild(risks);
-    }
-  }
 
-  function renderGeneratedFiles() {
-    if (!aiFilesReviewBox) return;
-    aiFilesReviewBox.style.display = 'block';
-    aiFilesReviewBox.innerHTML = '';
-    if (!generatedFiles.length) {
-      aiFilesReviewBox.textContent = 'No files generated.';
-      return;
-    }
-    const frag = document.createDocumentFragment();
-    generatedFiles.forEach(f => {
-      const wrap = document.createElement('div');
-      wrap.style.border = '1px solid var(--border,#333)';
-      wrap.style.borderRadius = '4px';
-      wrap.style.marginBottom = '6px';
-      wrap.style.padding = '4px 6px';
-      wrap.style.fontSize = '12px';
+    input.value = '';
+    input.placeholder = 'What changes would you like to make?'; // switch guidance after first turn
 
-      const head = document.createElement('div');
-      head.style.display = 'flex';
-      head.style.alignItems = 'center';
-      head.style.gap = '6px';
+    // Assistant thinking…
+    const thinkingId = pushMessage({
+      role: 'assistant',
+      html: `<div class="thinking">Planning your extension…</div>`,
+    });
 
-      const cb = document.createElement('input');
-      cb.type = 'checkbox';
-      cb.checked = f.included;
-      cb.addEventListener('change', () => { f.included = cb.checked; });
+    try {
+      // 1) PLAN
+      const planResp = await postPhase('plan', { prompt: text });
+      currentPlan = planResp?.plan || null;
 
-      const strong = document.createElement('strong');
-      strong.textContent = f.path;
-
-      const size = new Blob([f.content]).size;
-      const sizeSpan = document.createElement('span');
-      sizeSpan.textContent = `(${size} B)`;
-      sizeSpan.style.opacity = '0.7';
-
-      const toggle = document.createElement('button');
-      toggle.type = 'button';
-      toggle.textContent = 'View';
-      toggle.style.marginLeft = 'auto';
-      toggle.style.fontSize = '11px';
-
-      const pre = document.createElement('pre');
-      pre.style.display = 'none';
-      pre.style.whiteSpace = 'pre';
-      pre.style.overflow = 'auto';
-      pre.style.marginTop = '4px';
-      pre.textContent = f.content;
-
-      toggle.addEventListener('click', () => {
-        const open = pre.style.display === 'block';
-        pre.style.display = open ? 'none' : 'block';
-        toggle.textContent = open ? 'View' : 'Hide';
+      // Update assistant with plan summary + proposed files
+      replaceMessage(thinkingId, {
+        role: 'assistant',
+        html: renderPlanHtml(currentPlan),
       });
 
-      head.appendChild(cb);
-      head.appendChild(strong);
-      head.appendChild(sizeSpan);
-      head.appendChild(toggle);
-      wrap.appendChild(head);
-      wrap.appendChild(pre);
-      frag.appendChild(wrap);
-    });
-    aiFilesReviewBox.appendChild(frag);
-  }
+      // 2) GENERATE FILES (first pass)
+      const genThinking = pushMessage({
+        role: 'assistant',
+        html: `<div class="thinking">Generating files…</div>`,
+      });
 
-  async function postPhase(phase: 'plan' | 'generate', extra: any = {}) {
-    // Use last prompt if files exist (feedback mode), otherwise use current prompt
-    const currentPromptValue = ( $('prompt') as HTMLTextAreaElement )?.value || '';
-    const prompt = generatedFiles.length > 0 ? lastPrompt : currentPromptValue;
-    
-    console.log('Using prompt:', prompt?.slice(0, 100) + '...', 'Files exist:', generatedFiles.length > 0);
-    
-    if (!prompt.trim()) {
-      throw new Error('Prompt is required. Please enter a description of what you want the extension to do.');
+      const genResp = await postPhase('generate', { plan: currentPlan, prompt: text });
+      currentFiles = (genResp?.files || []).map((f: any) => ({ ...f, included: true }));
+
+      replaceMessage(genThinking, {
+        role: 'assistant',
+        html: renderFilesHtml(currentFiles),
+        attachments: { plan: currentPlan, files: currentFiles },
+        actions: { simulate: true, generate: true },
+      });
+
+    } catch (err: any) {
+      replaceMessage(thinkingId, {
+        role: 'assistant',
+        html: `<div class="error">Error: ${escapeHtml(err?.message || String(err))}</div>`,
+      });
     }
-    
-    const payload: any = {
-      phase,
-      prompt,
-      features: {
-        popup: ( $('feat-popup') as HTMLInputElement )?.checked || false,
-        background: ( $('feat-bg') as HTMLInputElement )?.checked || false,
-        contentScript: ( $('feat-cs') as HTMLInputElement )?.checked || false,
-        optionsPage: ( $('feat-options') as HTMLInputElement )?.checked || false,
-        sidePanel: ( $('feat-sidepanel') as HTMLInputElement )?.checked || false,
-      },
-      matches: parseMatches( ( $('matches') as HTMLTextAreaElement )?.value || '' ),
-      model: (() => {
-        const selected = aiModelSel?.value || 'auto';
-        if (selected === 'auto') {
-          // Priority order: gpt-5, gpt-4.1, gpt-4o, gpt-4o-mini
-          if (aiModelSel?.querySelector('option[value="gpt-5"]')) return 'gpt-5';
-          if (aiModelSel?.querySelector('option[value="gpt-4.1"]')) return 'gpt-4.1';
-          if (aiModelSel?.querySelector('option[value="gpt-4o"]')) return 'gpt-4o';
-          return 'gpt-4o-mini';
-        }
-        return selected;
-      })(),
-      temperature: aiTempRange ? Number(aiTempRange.value) : 0.4,
-      ...extra
-    };
-
-    const resp = await fetch(`${API_BASE}/api/extension-ai`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-    if (!resp.ok) {
-      const txt = await resp.text();
-      throw new Error(`HTTP ${resp.status}: ${txt.slice(0, 300)}`);
-    }
-    return resp.json();
-  }
-
-  async function handlePlan() {
-    if (!aiPlanBtn) return;
-    aiPlanBtn.disabled = true;
-    aiGenBtn && (aiGenBtn.disabled = true);
-    aiDlBtn && (aiDlBtn.disabled = true);
-    aiSimBtn && (aiSimBtn.disabled = true);
-    if (aiRetryBtn) { aiRetryBtn.disabled = true; aiRetryBtn.style.display = 'none'; }
-    lastPhase = 'plan';
-    
-    // Store current prompt for feedback mode (always store if prompt field has content)
-    const currentPrompt = ( $('prompt') as HTMLTextAreaElement )?.value || '';
-    if (currentPrompt.trim()) {
-      lastPrompt = currentPrompt;
-      // Persist the prompt
-      localStorage.setItem('crxgen.lastPrompt', currentPrompt);
-    }
-    
-    setAIStatus('Planning...');
-    aiPlanFilesBox && (aiPlanFilesBox.innerHTML = '');
-    try {
-      const data = await postPhase('plan');
-      currentPlan = data.plan;
-      renderPlanFiles();
-      setAIStatus('Plan ready.');
-      aiGenBtn && (aiGenBtn.disabled = false);
-    } catch (e: any) {
-      setAIStatus(`Plan failed: ${e.message}`, true);
-    } finally {
-      aiPlanBtn.disabled = false;
-    }
-  }
-
-  async function handleGenerate() {
-    if (!currentPlan || !aiGenBtn) return;
-    aiGenBtn.disabled = true;
-    aiPlanBtn && (aiPlanBtn.disabled = true);
-    aiDlBtn && (aiDlBtn.disabled = true);
-    aiSimBtn && (aiSimBtn.disabled = true);
-    if (aiRetryBtn) { aiRetryBtn.disabled = true; aiRetryBtn.style.display = 'none'; }
-    lastPhase = 'generate';
-    setAIStatus('Generating files...');
-    aiFilesReviewBox && (aiFilesReviewBox.style.display = 'none');
-    try {
-      const data = await postPhase('generate', { plan: currentPlan });
-      generatedFiles = (data.files || []).map((f: any) => ({ ...f, included: true }));
-      renderGeneratedFiles();
-      // Persist immediately with timestamp for short-term restore
-      try {
-        const key = 'crxgen.generatedFiles';
-        const payload = { ts: Date.now(), files: generatedFiles };
-        localStorage.setItem(key, JSON.stringify(payload));
-      } catch {}
-      setAIStatus('Files generated.');
-      aiDlBtn && (aiDlBtn.disabled = false);
-      aiSimBtn && (aiSimBtn.disabled = false);
-    } catch (e: any) {
-      setAIStatus(`Generate failed: ${e.message}`, true);
-    } finally {
-      aiGenBtn.disabled = false;
-      aiPlanBtn && (aiPlanBtn.disabled = false);
-    }
-  }
-
-  async function handleDownloadAI() {
-    if (!generatedFiles.length || !aiDlBtn) return;
-    aiDlBtn.disabled = true;
-    setAIStatus('Preparing ZIP...');
-    try {
-      const selected = generatedFiles.filter(f => f.included);
-      if (!selected.length) throw new Error('No files selected');
-      await generateZipFromFiles(
-        selected.map(f => ({ path: f.path, content: f.content })),
-        {
-          name: ( $('name') as HTMLInputElement )?.value || 'AI Extension',
-          version: ( $('version') as HTMLInputElement )?.value || '0.1.0',
-          addIconsIfMissing: true
-        }
-      );
-      setAIStatus('ZIP downloaded.');
-    } catch (e: any) {
-      setAIStatus(`ZIP failed: ${e.message}`, true);
-    } finally {
-      aiDlBtn.disabled = false;
-    }
-  }
-
-  /* ================= Simulator ================= */
-  type ChromeAPIs = Partial<typeof chrome> | any;
-
-  function createChromeStubs(): ChromeAPIs {
-    const listeners: Record<string, Function[]> = {};
-    const on = (key: string) => ({
-      addListener: (fn: Function) => {
-        (listeners[key] ||= []).push(fn);
-      }
-    });
-    const runtimeId = 'simulated-extension';
-    const api = {
-      runtime: {
-        id: runtimeId,
-        getURL: (path: string) => new URL(path, location.href).toString(),
-        onMessage: on('runtime.onMessage'),
-        sendMessage: (msg: any) => {
-          (listeners['runtime.onMessage'] || []).forEach(fn => {
-            try { fn(msg, { id: runtimeId }, () => {}); } catch {}
-          });
-        }
-      },
-      storage: {
-        local: {
-          _data: {} as Record<string, any>,
-          get: (keys?: any, cb?: (items: any) => void) => {
-            const result = keys ? Object.fromEntries(Object.keys(keys).map(k => [k, (chrome as any)?.storage?.local?._data?.[k]])) : (chrome as any)?.storage?.local?._data || {};
-            cb && cb(result);
-            return Promise.resolve(result);
-          },
-          set: (items: any, cb?: () => void) => {
-            Object.assign((chrome as any).storage.local._data, items);
-            cb && cb();
-            return Promise.resolve();
-          }
-        }
-      },
-      tabs: {
-        create: ({ url }: { url: string }) => {
-          try { (window as any).parent?._crxSimNav?.(url); }
-          catch { /* noop */ }
-        },
-        query: (_q: any, cb: Function) => cb([{ id: 0 }]),
-        update: (_id: number, { url }: { url: string }) => {
-          try { (window as any).parent?._crxSimNav?.(url); }
-          catch { /* noop */ }
-        }
-      }
-    } as any;
-    // Allow content script to post back logs
-    (api as any)._log = (type: 'log'|'error', payload: any) => {
-      if (aiSimLogs) {
-        aiSimLogs.style.display = 'block';
-        const line = document.createElement('div');
-        line.style.whiteSpace = 'pre-wrap';
-        line.style.color = type === 'error' ? 'var(--danger,#d33)' : 'inherit';
-        line.textContent = typeof payload === 'string' ? payload : JSON.stringify(payload);
-        aiSimLogs.appendChild(line);
-        aiSimLogs.scrollTop = aiSimLogs.scrollHeight;
-      }
-    };
-    return api;
-  }
-
-  // Disabled sandbox path to avoid MV3 page CSP issues; rely on chrome.scripting injection only
-  function runInIsolatedEval(_sourceCode: string): void {
-    setAIStatus('Simulation fallback disabled due to CSP. Please run from a Chrome extension popup with scripting permission.', true);
-  }
-
-  function navigateCurrentTab(url: string): void {
-    const c: any = (window as any).chrome;
-    if (c && c.tabs && typeof c.tabs.query === 'function' && typeof c.tabs.update === 'function') {
-      try {
-        c.tabs.query({ active: true, currentWindow: true }, (tabs: any[]) => {
-          const tabId = tabs && tabs[0] && tabs[0].id;
-          if (tabId != null) {
-            c.tabs.update(tabId, { url });
-          } else {
-            window.location.assign(url);
-          }
-        });
-        return;
-      } catch {}
-    }
-    // Fallback: navigate this page
-    window.location.assign(url);
-  }
-
-  function extractContentScriptFromGenerated(): string | null {
-    // 1) Try manifest.json content_scripts
-    try {
-      const manifestFile = generatedFiles.find(f => f.path === 'manifest.json' && f.included);
-      if (manifestFile) {
-        const mf = JSON.parse(manifestFile.content);
-        const scripts: string[] = [];
-        const list = Array.isArray(mf.content_scripts) ? mf.content_scripts : [];
-        for (const entry of list) {
-          const jsArr = Array.isArray(entry.js) ? entry.js : [];
-          for (const p of jsArr) {
-            const file = generatedFiles.find(f => f.path === p && f.included);
-            if (file) scripts.push(file.content);
-          }
-        }
-        if (scripts.length) return scripts.join('\n;\n');
-      }
-    } catch {}
-    // 2) Fallback: explicit content_script.js
-    const byPath = generatedFiles.find(f => /content_script\.js$/i.test(f.path) && f.included);
-    if (byPath) return byPath.content;
-    // 3) Fallback: any included .js files concatenated
-    const anyJs = generatedFiles.filter(f => /\.js$/i.test(f.path) && f.included);
-    if (anyJs.length) return anyJs.map(f => f.content).join('\n;\n');
-    return null;
-  }
-
-  function simulateDemoHelloWorld(): void {
-    // Simple demo: open Google search for "hello world"
-    const url = 'https://www.google.com/search?q=' + encodeURIComponent('hello world');
-    navigateCurrentTab(url);
-  }
-
-  async function handleSimulate() {
-    if (!aiSimBtn || !generatedFiles.length) return;
-    aiSimBtn.disabled = true;
-    setAIStatus('Simulating...');
-    if (aiSimLogs) { aiSimLogs.innerHTML = ''; aiSimLogs.style.display = 'block'; }
-    try {
-      const code = extractContentScriptFromGenerated();
-      console.log('Generated code to simulate:', code?.slice(0, 200) + '...');
-      if (code) {
-        // Prefer real tab injection if available
-        const c: any = (window as any).chrome;
-        if (c && c.scripting && typeof c.tabs?.query === 'function') {
-          c.tabs.query({ active: true, currentWindow: true }, (tabs: any[]) => {
-            const tabId = tabs && tabs[0] && tabs[0].id;
-            if (tabId == null) {
-              setAIStatus('No active tab found for injection.', true);
-              if (aiFeedbackBox) aiFeedbackBox.style.display = 'block';
-              return;
-            }
-            // Use MAIN world injection to avoid CSP issues in isolated world
-            c.scripting.executeScript({
-              target: { tabId },
-              world: 'MAIN',
-              args: [code],
-              func: (codeStr: string) => {
-                try {
-                  // Install logging hooks that forward to popup via runtime.sendMessage
-                  try {
-                    const __origLog = console.log; const __origErr = console.error;
-                    console.log = function(...args: any[]){ try { chrome.runtime.sendMessage({type:'sim-log', level:'log', args:args.map(a=>''+a)}); } catch(_){}; return (__origLog as any).apply(console, args as any); } as any;
-                    console.error = function(...args: any[]){ try { chrome.runtime.sendMessage({type:'sim-log', level:'error', args:args.map(a=>''+a)}); } catch(_){}; return (__origErr as any).apply(console, args as any); } as any;
-                  } catch(_) {}
-                  
-                  // Execute in main world where CSP is more permissive for extension scripts
-                  const script = document.createElement('script');
-                  script.textContent = codeStr;
-                  document.documentElement.appendChild(script);
-                  script.remove();
-                } catch (e) {
-                  try { console.error((e as any)?.stack || String(e)); } catch(_){ }
-                }
-              }
-            }, () => {
-              const lastError = c.runtime && c.runtime.lastError && c.runtime.lastError.message;
-              if (lastError) {
-                setAIStatus(`Injection failed: ${lastError}`, true);
-              } else {
-                setAIStatus('Content script simulated (in page).');
-              }
-              if (aiFeedbackBox) aiFeedbackBox.style.display = 'block';
-            });
-          });
-        } else {
-          setAIStatus('Simulation requires Chrome extension environment (scripting API).', true);
-          if (aiFeedbackBox) aiFeedbackBox.style.display = 'block';
-        }
-      } else {
-        // No generated files or no JS present; run demo
-        console.log('No content script found, running demo');
-        simulateDemoHelloWorld();
-        setAIStatus('Demo simulated (no content script found).');
-        if (aiFeedbackBox) aiFeedbackBox.style.display = 'block';
-      }
-    } catch (e: any) {
-      setAIStatus(`Simulation failed: ${e.message}`, true);
-    } finally {
-      aiSimBtn.disabled = false;
-    }
-  }
-
-  function persistGeneratedFiles() {
-    try {
-      const key = 'crxgen.generatedFiles';
-      const payload = { ts: Date.now(), files: generatedFiles.map(f => ({ path: f.path, content: f.content, included: f.included })) };
-      localStorage.setItem(key, JSON.stringify(payload));
-    } catch {}
-  }
-
-  function loadPersistedGeneratedFiles() {
-    try {
-      const key = 'crxgen.generatedFiles';
-      const raw = localStorage.getItem(key);
-      if (raw) {
-        const obj = JSON.parse(raw);
-        const now = Date.now();
-        const within = obj && typeof obj.ts === 'number' && (now - obj.ts) <= 3 * 60 * 1000; // 3 minutes
-        if (within && Array.isArray(obj.files)) {
-          generatedFiles = obj.files;
-          renderGeneratedFiles();
-          // Enable buttons when files are loaded
-          aiDlBtn && (aiDlBtn.disabled = false);
-          aiSimBtn && (aiSimBtn.disabled = false);
-        } else {
-          // Expire old cache
-          localStorage.removeItem(key);
-        }
-      }
-      
-      // Also load last prompt
-      const promptKey = 'crxgen.lastPrompt';
-      const savedPrompt = localStorage.getItem(promptKey);
-      if (savedPrompt) {
-        lastPrompt = savedPrompt;
-      }
-    } catch {}
-  }
-
-  aiApplyFeedback?.addEventListener('click', () => {
-    const note = (aiFeedback?.value || '').trim();
-    if (!note) { alert('Please enter feedback.'); return; }
-    feedbackNotes = note;
-    // Save for later send with plan/generate
-    localStorage.setItem('crxgen.feedbackNotes', feedbackNotes);
-    persistGeneratedFiles();
-    setAIStatus('Feedback saved. You can re-run Plan/Generate to apply changes.');
   });
 
-  aiTempRange?.addEventListener('input', () => {
-    if (aiTempVal) aiTempVal.textContent = aiTempRange.value;
-  });
-  aiPlanBtn?.addEventListener('click', handlePlan);
-  aiGenBtn?.addEventListener('click', handleGenerate);
-  aiDlBtn?.addEventListener('click', handleDownloadAI);
-  aiSimBtn?.addEventListener('click', handleSimulate);
-  aiRetryBtn?.addEventListener('click', () => {
-    if (lastPhase === 'plan') handlePlan();
-    else if (lastPhase === 'generate') handleGenerate();
+  // Messages container: delegate clicks for simulate / generate / include toggles
+  on($('#messages')!, 'click', (e: Event) => {
+    const t = e.target as HTMLElement;
+    if (t.matches('[data-action="simulate"]')) {
+      e.preventDefault();
+      handleSimulate();
+    } else if (t.matches('[data-action="generate-zip"]')) {
+      e.preventDefault();
+      handleDownloadZip();
+    } else if (t.matches('[data-toggle-file]')) {
+      const path = t.getAttribute('data-toggle-file')!;
+      const entry = currentFiles.find(f => f.path === path);
+      if (entry) {
+        entry.included = !entry.included;
+        t.setAttribute('aria-pressed', String(!!entry.included));
+        t.textContent = entry.included ? 'Included' : 'Excluded';
+      }
+    } else if (t.matches('[data-action="toggle-code"]')) {
+      const pre = t.closest('.file-card')?.querySelector('pre') as HTMLElement | null;
+      if (pre) {
+        const open = pre.hasAttribute('hidden') ? false : true;
+        if (open) pre.setAttribute('hidden', '');
+        else pre.removeAttribute('hidden');
+        t.textContent = open ? 'View' : 'Hide';
+      }
+    }
   });
 
-  // Restore previous session
-  loadPersistedGeneratedFiles();
-
+  // Restore short-lived session (3 minutes)
+  restoreSession();
 });
+
+/* ---------- API ---------- */
+async function postPhase(
+  phase: 'plan' | 'generate' | 'revise',
+  extra: any = {}
+) {
+  // Resolve "auto" model priority here if you want (optional)
+  const resolvedModel = model;
+
+  const payload = {
+    phase,
+    model: resolvedModel,
+    temperature,
+    ...extra,
+  };
+
+  const resp = await fetch(`${API_BASE}/api/extension-ai`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+
+  if (!resp.ok) {
+    const txt = await resp.text();
+    throw new Error(`HTTP ${resp.status}: ${txt.slice(0, 300)}`);
+  }
+  return resp.json();
+}
+
+/* ---------- render helpers ---------- */
+function pushMessage(m: Omit<Msg, 'id'>): string {
+  const id = crypto.randomUUID();
+  const msg: Msg = { id, ...m };
+  messages.push(msg);
+  renderMessages();
+  return id;
+}
+
+function replaceMessage(id: string, m: Omit<Msg, 'id'>) {
+  const i = messages.findIndex(x => x.id === id);
+  if (i >= 0) {
+    messages[i] = { id, ...m };
+    renderMessages();
+  }
+}
+
+function renderMessages() {
+  const box = $('#messages')!;
+  box.innerHTML = messages.map(renderMessage).join('');
+  box.scrollTop = box.scrollHeight;
+}
+
+function renderMessage(m: Msg) {
+  const side = m.role === 'user' ? 'right' : 'left';
+  const actions = m.actions ? renderActions(m.actions) : '';
+  return `
+    <article class="bubble ${side}">
+      <div class="bubble-inner">${m.html}</div>
+      ${m.attachments?.files ? renderFilesSection(m.attachments.files) : ''}
+      ${actions}
+    </article>
+  `;
+}
+
+function renderActions(a: NonNullable<Msg['actions']>) {
+  const buttons: string[] = [];
+  if (a.simulate) buttons.push(`<button class="secondary" data-action="simulate">Simulate</button>`);
+  if (a.generate) buttons.push(`<button class="primary" data-action="generate-zip">Generate ZIP</button>`);
+  return `<div class="actions">${buttons.join('')}</div>`;
+}
+
+function renderPlanHtml(plan: AIPlan) {
+  if (!plan) return `<div>No plan returned.</div>`;
+  const files = plan.files?.map(f => `<li><code>${escapeHtml(f.path)}</code> – ${escapeHtml(f.purpose)}</li>`).join('') || '';
+  const risks = plan.risks?.length ? `<p><strong>Risks:</strong> ${plan.risks.map(escapeHtml).join('; ')}</p>` : '';
+  return `
+    <h3>Plan v${plan.planVersion || 1}</h3>
+    <p>${escapeHtml(plan.summary || '')}</p>
+    <details open><summary>Planned files</summary><ul>${files}</ul></details>
+    ${risks}
+  `;
+}
+
+function renderFilesHtml(files: FileEntry[]) {
+  if (!files?.length) return `<div>No files generated.</div>`;
+  return `<div class="file-list">
+    ${files.map(renderFileCard).join('')}
+  </div>`;
+}
+
+function renderFilesSection(files: FileEntry[]) {
+  return `<section class="assistant-attachments">${renderFilesHtml(files)}</section>`;
+}
+
+function renderFileCard(f: FileEntry) {
+  const size = new Blob([f.content]).size;
+  const included = f.included !== false;
+  return `
+    <div class="file-card">
+      <header>
+        <strong>${escapeHtml(f.path)}</strong>
+        <span class="muted">(${size} B)</span>
+        <div class="spacer"></div>
+        <button class="chip" data-toggle-file="${escapeHtml(f.path)}" aria-pressed="${included}">${included ? 'Included' : 'Excluded'}</button>
+        <button class="link" data-action="toggle-code">View</button>
+      </header>
+      <pre hidden>${escapeHtml(f.content)}</pre>
+    </div>
+  `;
+}
+
+function escapeHtml(s: string) {
+  return s.replace(/[&<>"']/g, (c) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string)
+  );
+}
+
+/* ---------- textarea autoresize ---------- */
+function autoResize(ta: HTMLTextAreaElement) {
+  const fit = () => {
+    ta.style.height = 'auto';
+    ta.style.height = Math.min(180, Math.max(36, ta.scrollHeight)) + 'px';
+  };
+  on(ta, 'input', fit);
+  fit();
+}
+
+/* ---------- session (short-lived) ---------- */
+function persistSession() {
+  try {
+    const key = 'crxgen.session';
+    const payload = { ts: Date.now(), files: currentFiles };
+    localStorage.setItem(key, JSON.stringify(payload));
+  } catch {}
+}
+function restoreSession() {
+  try {
+    const raw = localStorage.getItem('crxgen.session');
+    if (!raw) return;
+    const obj = JSON.parse(raw);
+    if (obj && Array.isArray(obj.files) && Date.now() - obj.ts <= 3 * 60 * 1000) {
+      currentFiles = obj.files;
+      // show a small system message and files
+      pushMessage({
+        role: 'assistant',
+        html: `<div class="muted">Restored previous files (last 3 min).</div>`,
+        attachments: { files: currentFiles },
+        actions: { simulate: true, generate: true },
+      });
+    } else {
+      localStorage.removeItem('crxgen.session');
+    }
+  } catch {}
+}
+
+/* ---------- simulate & generate ---------- */
+async function handleDownloadZip() {
+  if (!currentFiles?.length) return;
+  const selected = currentFiles.filter(f => f.included !== false);
+  if (!selected.length) {
+    pushMessage({ role: 'assistant', html: `<div class="error">No files selected.</div>` });
+    return;
+  }
+  try {
+    await generateZipFromFiles(
+      selected.map(f => ({ path: f.path, content: f.content })),
+      { name: 'AI Extension', version: '0.1.0', addIconsIfMissing: true }
+    );
+    pushMessage({ role: 'assistant', html: `<div class="success">ZIP generated and downloaded.</div>` });
+  } catch (e: any) {
+    pushMessage({ role: 'assistant', html: `<div class="error">ZIP failed: ${escapeHtml(e?.message || String(e))}</div>` });
+  }
+}
+
+function extractContentScriptFromGenerated(files: FileEntry[]): string | null {
+  try {
+    const mf = files.find(f => f.path === 'manifest.json' && f.included !== false);
+    if (mf) {
+      const manifest = JSON.parse(mf.content);
+      const list = Array.isArray(manifest.content_scripts) ? manifest.content_scripts : [];
+      const parts: string[] = [];
+      for (const entry of list) {
+        const jsArr = Array.isArray(entry.js) ? entry.js : [];
+        for (const p of jsArr) {
+          // Skip background/service worker files - they can't run in page context
+          if (p.includes('background') || p.includes('service_worker')) continue;
+          
+          const file = files.find(f => f.path === p && f.included !== false);
+          if (file) parts.push(file.content);
+        }
+      }
+      if (parts.length) return parts.join('\n;\n');
+    }
+  } catch {}
+  
+  // Fallback: find content_script.js but exclude background files
+  const byPath = files.find(f => 
+    /content_script\.js$/i.test(f.path) && 
+    f.included !== false &&
+    !f.path.includes('background') &&
+    !f.path.includes('service_worker')
+  );
+  if (byPath) return byPath.content;
+  
+  // Last resort: any JS file except background/service worker
+  const anyJs = files.filter(f => 
+    /\.js$/i.test(f.path) && 
+    f.included !== false &&
+    !f.path.includes('background') &&
+    !f.path.includes('service_worker')
+  );
+  if (anyJs.length) return anyJs.map(f => f.content).join('\n;\n');
+  
+  return null;
+}
+
+async function handleSimulate() {
+  if (!currentFiles?.length) {
+    pushMessage({ role: 'assistant', html: `<div class="muted">No generated files to simulate.</div>` });
+    return;
+  }
+  const code = extractContentScriptFromGenerated(currentFiles);
+  if (!code) {
+    pushMessage({ role: 'assistant', html: `<div class="muted">No content script found. Try generating again.</div>` });
+    return;
+  }
+
+  const c: any = (window as any).chrome;
+  if (!(c && c.scripting && typeof c.tabs?.query === 'function')) {
+    pushMessage({ role: 'assistant', html: `<div class="error">Simulation requires extension context with "scripting" permission.</div>` });
+    return;
+  }
+
+  try {
+    c.tabs.query({ active: true, currentWindow: true }, (tabs: any[]) => {
+      const tabId = tabs && tabs[0] && tabs[0].id;
+      if (tabId == null) {
+        pushMessage({ role: 'assistant', html: `<div class="error">No active tab found for injection.</div>` });
+        return;
+      }
+      c.scripting.executeScript({
+        target: { tabId },
+        world: 'MAIN',
+        args: [code],
+        func: (codeStr: string) => {
+          try {
+            const script = document.createElement('script');
+            script.textContent = codeStr;
+            document.documentElement.appendChild(script);
+            script.remove();
+          } catch (e) {
+            console.error(e);
+          }
+        }
+      }, () => {
+        const lastError = c.runtime?.lastError?.message;
+        if (lastError) {
+          pushMessage({ role: 'assistant', html: `<div class="error">Injection failed: ${escapeHtml(lastError)}</div>` });
+        } else {
+          pushMessage({ role: 'assistant', html: `<div class="success">Simulated in the current page. Check behavior and console logs.</div>` });
+        }
+      });
+    });
+  } catch (e: any) {
+    pushMessage({ role: 'assistant', html: `<div class="error">Simulation failed: ${escapeHtml(e?.message || String(e))}</div>` });
+  }
+
+  persistSession();
+}

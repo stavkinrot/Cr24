@@ -1,4 +1,8 @@
+// extension-generator.ts
 import JSZip from 'jszip';
+
+/* ===== Types shared with popup/server ===== */
+export type AIFile = { path: string; content: string };
 
 export type Features = {
   popup: boolean;
@@ -27,9 +31,56 @@ export type GenerateOptions = {
 };
 
 type TokenMap = Record<string, string>;
+type Manifest = Record<string, any>;
 
+/**
+ * Normalize a v3 manifest so the exported ZIP is functional even if the AI omitted bits.
+ * Pass havePopupHtml=true when popup.html exists in the bundle.
+ */
+function normalizeManifest(m: Manifest, havePopupHtml: boolean): Manifest {
+  const out: Manifest = {
+    manifest_version: 3,
+    name: m?.name || "CRX Generator Output",
+    version: m?.version || "0.1.0",
+    description: m?.description || "",
+    icons: m?.icons || { 16: "icon.png", 32: "icon.png", 48: "icon.png", 128: "icon.png" },
+    ...m,
+  };
+
+  // If the bundle has popup.html, ensure the manifest points to it
+  if (havePopupHtml) {
+    out.action = {
+      ...(out.action || {}),
+      default_popup: out?.action?.default_popup || "popup.html"
+    };
+  }
+
+  // Permissions needed so your Simulate flow can inject code
+  const perms = new Set([...(out.permissions || []), "scripting", "activeTab", "storage"]);
+  out.permissions = [...perms];
+
+  // Reasonable default host access (edit in UI later if needed)
+  out.host_permissions = out.host_permissions || ["https://*/*", "http://*/*"];
+
+  // If background was declared but not wired correctly, normalize to MV3 service worker
+  if (out.background && !out.background.service_worker && !out.background.scripts) {
+    out.background = { service_worker: "background.js" };
+  }
+
+  return out;
+}
+
+/** Ensure popup.html actually loads popup.js */
+function ensurePopupHasScript(html: string): string {
+  return /popup\.js/i.test(html)
+    ? html
+    : (html.replace(/<\/body>/i, `\n<script src="popup.js"></script>\n</body>`) ||
+       (html + `\n<script src="popup.js"></script>`));
+}
+
+/* ===== Small utilities ===== */
 function slugify(input: string): string {
-  return input
+  return (input || 'extension')
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/(^-|-$)+/g, '');
@@ -44,6 +95,15 @@ function interpolate(text: string, tokens: TokenMap): string {
   return out;
 }
 
+/** Normalize files for API / storage (trim leading slashes; coerce to string). */
+export function normalizeFilesForApi(files: { path: string; content: any }[]): AIFile[] {
+  return (files || []).map((f) => ({
+    path: String(f?.path || '').replace(/^\/+/, ''),
+    content: String(f?.content ?? ''),
+  }));
+}
+
+/* ===== Manifest composer (for locally generated ZIP) ===== */
 function composeManifest(opts: GenerateOptions) {
   const { name, description, version, features, matches } = opts;
 
@@ -52,12 +112,7 @@ function composeManifest(opts: GenerateOptions) {
     name,
     description,
     version,
-    icons: {
-      16: 'icon.png',
-      32: 'icon.png',
-      48: 'icon.png',
-      128: 'icon.png',
-    },
+    icons: { 16: 'icon.png', 32: 'icon.png', 48: 'icon.png', 128: 'icon.png' },
   };
 
   if (features.popup) {
@@ -95,70 +150,55 @@ function composeManifest(opts: GenerateOptions) {
     };
   }
 
-  // Keep minimal permissions; users can add more as needed.
-  manifest.permissions = [];
+  // Keep minimal permissions for generated bundle; users can add more as needed.
+  manifest.permissions = ["scripting", "activeTab", "storage"];
+  manifest.host_permissions = manifest.host_permissions || ["https://*/*", "http://*/*"];
 
   return manifest;
 }
 
-async function makeIconBase64(size: number, label: string): Promise<string> {
-  // Legacy: dark theme colors
+/* ===== Icon generation (canvas) ===== */
+async function makeIconBase64(
+  size: number,
+  label: string,
+  colors: { bg: string; border: string; text: string }
+): Promise<string> {
   const canvas = document.createElement('canvas');
   canvas.width = size;
   canvas.height = size;
   const ctx = canvas.getContext('2d')!;
-  ctx.fillStyle = '#121a34';
-  ctx.fillRect(0, 0, size, size);
-  ctx.strokeStyle = '#7aa2f7';
-  ctx.lineWidth = Math.max(2, Math.round(size / 16));
-  ctx.strokeRect(ctx.lineWidth / 2, ctx.lineWidth / 2, size - ctx.lineWidth, size - ctx.lineWidth);
-  ctx.fillStyle = '#e6e9f2';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.font = `${Math.round(size * 0.55)}px system-ui, sans-serif`;
-  ctx.fillText(label, size / 2, Math.round(size * 0.56));
-  const dataUrl = canvas.toDataURL('image/png');
-  return dataUrl.split(',')[1];
-}
 
-async function makeIconBase64Colored(size: number, label: string, colors: { bg: string; border: string; text: string }): Promise<string> {
-  const canvas = document.createElement('canvas');
-  canvas.width = size;
-  canvas.height = size;
-  const ctx = canvas.getContext('2d')!;
   // Background
   ctx.fillStyle = colors.bg;
   ctx.fillRect(0, 0, size, size);
+
   // Accent border
   ctx.strokeStyle = colors.border;
   ctx.lineWidth = Math.max(2, Math.round(size / 16));
   ctx.strokeRect(ctx.lineWidth / 2, ctx.lineWidth / 2, size - ctx.lineWidth, size - ctx.lineWidth);
+
   // Letter
   ctx.fillStyle = colors.text;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
   ctx.font = `${Math.round(size * 0.55)}px system-ui, sans-serif`;
   ctx.fillText(label, size / 2, Math.round(size * 0.56));
+
   const dataUrl = canvas.toDataURL('image/png');
   return dataUrl.split(',')[1];
 }
 
-async function generateIconsBase64(name: string) {
-  const letter = (name.trim()[0] || 'X').toUpperCase();
+async function generateIconsBase64WithColors(
+  name: string,
+  colors: { bg: string; border: string; text: string }
+) {
+  const letter = (name?.trim?.()[0] || 'X').toUpperCase();
   const sizes = [16, 32, 48, 128];
   const out: Record<number, string> = {};
   for (const s of sizes) {
-    out[s] = await makeIconBase64(s, letter);
-  }
-  return out;
-}
-
-async function generateIconsBase64WithColors(name: string, colors: { bg: string; border: string; text: string }) {
-  const letter = (name.trim()[0] || 'X').toUpperCase();
-  const sizes = [16, 32, 48, 128];
-  const out: Record<number, string> = {};
-  for (const s of sizes) {
-    out[s] = await makeIconBase64Colored(s, letter, colors);
+    out[s] = await makeIconBase64(s, letter, colors);
   }
   return out;
 }
@@ -176,28 +216,34 @@ async function generateIconsFromUpload(dataUrl: string) {
   const sizes = [16, 32, 48, 128];
   const out: Record<number, string> = {};
   const img = await loadImage(dataUrl);
+
   for (const s of sizes) {
     const canvas = document.createElement('canvas');
     canvas.width = s;
     canvas.height = s;
     const ctx = canvas.getContext('2d')!;
+
     // Clear transparent background
     ctx.clearRect(0, 0, s, s);
+
     // Fit image using contain while centering
     const scale = Math.min(s / img.width, s / img.height);
     const dw = Math.round(img.width * scale);
     const dh = Math.round(img.height * scale);
     const dx = Math.floor((s - dw) / 2);
     const dy = Math.floor((s - dh) / 2);
+
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
     ctx.drawImage(img, dx, dy, dw, dh);
+
     const b64 = canvas.toDataURL('image/png').split(',')[1];
     out[s] = b64;
   }
   return out;
 }
 
+/* ===== Simple templates for local (non-AI) generation ===== */
 const templates = {
   popupHtml: [
     '<!doctype html>',
@@ -257,9 +303,7 @@ const templates = {
     '</html>',
   ].join('\n'),
 
-  optionsJs: [
-    `console.log('Options page for {{NAME}}');`,
-  ].join('\n'),
+  optionsJs: [`console.log('Options page for {{NAME}}');`].join('\n'),
 
   sidePanelHtml: [
     '<!doctype html>',
@@ -278,9 +322,7 @@ const templates = {
     '</html>',
   ].join('\n'),
 
-  sidePanelJs: [
-    `console.log('Side panel for {{NAME}}');`,
-  ].join('\n'),
+  sidePanelJs: [`console.log('Side panel for {{NAME}}');`].join('\n'),
 
   readmeMd: [
     '# {{NAME}}',
@@ -304,10 +346,11 @@ const templates = {
   ].join('\n'),
 };
 
+/* ===== Local (non-AI) generator: build ZIP from options ===== */
 export async function generateZip(opts: GenerateOptions): Promise<void> {
   const zip = new JSZip();
-
   const pkgName = slugify(opts.name);
+
   const tokens: TokenMap = {
     NAME: opts.name,
     DESCRIPTION: opts.description || '',
@@ -359,8 +402,9 @@ export async function generateZip(opts: GenerateOptions): Promise<void> {
     icons = await generateIconsBase64WithColors(opts.name, colors);
   }
 
-// Save a single high-res image; 128px is a good default
-zip.file('icon.png', icons[128], { base64: true });
+  // Save a single high-res image; 128px is a good default
+  zip.file('icon.png', icons[128], { base64: true });
+
   const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -372,154 +416,178 @@ zip.file('icon.png', icons[128], { base64: true });
   URL.revokeObjectURL(url);
 }
 
-// --- AI helper: generate a ZIP from an already prepared list of files (AI output) ---
-// Files must include manifest.json. If icons are missing and addIconsIfMissing=true, placeholder
-// icons will be generated using either provided name initial or 'X'.
+/* ===== AI helper: build ZIP from AI-returned files ===== */
 export async function generateZipFromFiles(
   files: { path: string; content: string }[],
   opts: {
     name: string;
     version?: string;
     addIconsIfMissing?: boolean;
-    // Optional icon colors (same structure as automatic icons)
     colors?: { bg: string; border: string; text: string };
-    downloadName?: string; // base filename for zip (without .zip)
+    downloadName?: string;
   }
 ): Promise<void> {
-  if (!Array.isArray(files) || !files.length) {
-    throw new Error('No files supplied');
-  }
-  const hasManifest = files.some(f => f.path === 'manifest.json');
-  if (!hasManifest) {
-    throw new Error('manifest.json missing');
-  }
+  if (!Array.isArray(files) || !files.length) throw new Error("No files supplied");
 
+  // --- helpers (scoped, no extra imports/types needed) ---
+  const normPath = (p: string) => String(p || "").replace(/^\/+/, "");
+  const addToZip = (zip: JSZip, map: Map<string, string>, p: string, c: string) => {
+    p = normPath(p);
+    map.set(p, c);
+    zip.file(p, c);
+  };
+
+  const normalizeManifestLocal = (m: Manifest, havePopupHtml: boolean): Manifest => {
+    const out: Manifest = {
+      manifest_version: 3,
+      name: m?.name || "CRX Generator Output",
+      version: m?.version || "0.1.0",
+      description: m?.description || "",
+      icons: m?.icons || { 16: "icon.png", 32: "icon.png", 48: "icon.png", 128: "icon.png" },
+      ...m,
+    };
+
+    // Ensure popup points to popup.html if it exists
+    if (havePopupHtml) {
+      out.action = {
+        ...(out.action || {}),
+        default_popup: out?.action?.default_popup || "popup.html"
+      };
+    }
+
+    // Permissions that make simulation/content injection work
+    const perms = new Set([...(out.permissions || []), "scripting", "activeTab", "storage"]);
+    out.permissions = [...perms];
+
+    // Reasonable default host access (adjust in UI if needed)
+    out.host_permissions = out.host_permissions || ["https://*/*", "http://*/*"];
+
+    // Normalize background to MV3 SW if present but malformed
+    if (out.background && !out.background.service_worker && !out.background.scripts) {
+      out.background = { service_worker: "background.js" };
+    }
+
+    return out;
+  };
+
+  // --- stage 1: write everything verbatim, track what exists ---
   const zip = new JSZip();
+  const existing = new Map<string, string>();
+  for (const f of files) addToZip(zip, existing, f.path, String(f.content ?? ""));
 
-  // Write provided files verbatim
-  const existingPaths = new Set<string>();
-  for (const f of files) {
-    // Normalize simple leading slashes
-    const normalized = f.path.replace(/^\/+/, '');
-    existingPaths.add(normalized);
-    zip.file(normalized, f.content);
+  // --- stage 2: parse + normalize manifest ---
+  const manPath = "manifest.json";
+  const rawMan = existing.get(manPath);
+  if (!rawMan) throw new Error("manifest.json missing");
+
+  let manifest: Manifest;
+  try {
+    manifest = JSON.parse(rawMan);
+  } catch {
+    throw new Error("manifest.json is not valid JSON");
   }
 
-  // Attempt to parse manifest to discover declared icon paths
-  let manifestIconsSpec: { size: number; path: string }[] = [];
-  if (opts.addIconsIfMissing) {
-    try {
-      const manifestFile = files.find(f => f.path === 'manifest.json');
-      if (manifestFile) {
-        const manifestJson = JSON.parse(manifestFile.content);
-        if (manifestJson && typeof manifestJson.icons === 'object' && manifestJson.icons) {
-          for (const [k, v] of Object.entries(manifestJson.icons)) {
-            if (typeof v === 'string') {
-              const sizeNum = Number.parseInt(k, 10);
-              manifestIconsSpec.push({
-                size: Number.isFinite(sizeNum) ? sizeNum : 128,
-                path: v.replace(/^\/+/, ''),
-              });
-            }
-          }
-        }
-      }
-    } catch {
-      // swallow JSON errors; we only do best-effort augmentation
+  const havePopupHtml = existing.has("popup.html");
+  manifest = normalizeManifestLocal(manifest, havePopupHtml);
+
+  // --- stage 3: popup guarantees (only if popup.html is present) ---
+  if (havePopupHtml) {
+    const fixedPopup = ensurePopupHasScript(existing.get("popup.html")!);
+    if (fixedPopup !== existing.get("popup.html")) addToZip(zip, existing, "popup.html", fixedPopup);
+
+    if (!existing.has("popup.js")) {
+      addToZip(
+        zip,
+        existing,
+        "popup.js",
+        `document.addEventListener('DOMContentLoaded',()=>{console.log('[Popup] ready');});`
+      );
+    }
+
+    if (!existing.has("styles.css")) {
+      addToZip(zip, existing, "styles.css", `body{font:13px system-ui,sans-serif;padding:10px}`);
     }
   }
 
-  // Helper to determine if any icon asset already exists
+  // --- stage 4: icons (best-effort, preserves your previous behavior) ---
   const anyIconAssetPresent = () =>
-    Array.from(existingPaths).some(p => /icon/i.test(p) && /\.(png|svg)$/i.test(p));
+    [...existing.keys()].some(p => /icon/i.test(p) && /\.(png|svg)$/i.test(p));
 
-  const letter = (opts.name?.trim?.()[0] || 'X').toUpperCase();
+  let manifestIconsSpec: { size: number; path: string }[] = [];
+  try {
+    if (manifest?.icons && typeof manifest.icons === "object") {
+      for (const [k, v] of Object.entries(manifest.icons)) {
+        if (typeof v === "string") {
+          const sizeNum = Number.parseInt(k, 10);
+          manifestIconsSpec.push({
+            size: Number.isFinite(sizeNum) ? sizeNum : 128,
+            path: normPath(v),
+          });
+        }
+      }
+    }
+  } catch {
+    /* ignore */
+  }
 
-  // Generate any missing manifest-declared icon assets
+  const letter = (opts.name?.trim?.()[0] || "X").toUpperCase();
+  const colors = opts.colors || { bg: "#121a34", border: "#7aa2f7", text: "#e6e9f2" };
+
   if (opts.addIconsIfMissing && manifestIconsSpec.length) {
-    const colors = opts.colors || { bg: '#121a34', border: '#7aa2f7', text: '#e6e9f2' };
     for (const spec of manifestIconsSpec) {
-      if (!existingPaths.has(spec.path)) {
-        // Reuse colored icon helper for arbitrary size
+      if (!existing.has(spec.path)) {
         const size = Math.max(16, Math.min(spec.size || 128, 512));
-        const canvas = document.createElement('canvas');
-        canvas.width = size;
-        canvas.height = size;
-        const ctx = canvas.getContext('2d')!;
-        ctx.fillStyle = colors.bg;
-        ctx.fillRect(0, 0, size, size);
-        ctx.strokeStyle = colors.border;
-        ctx.lineWidth = Math.max(2, Math.round(size / 16));
-        ctx.strokeRect(ctx.lineWidth / 2, ctx.lineWidth / 2, size - ctx.lineWidth, size - ctx.lineWidth);
-        ctx.fillStyle = colors.text;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.font = `${Math.round(size * 0.55)}px system-ui, sans-serif`;
-        ctx.fillText(letter, size / 2, Math.round(size * 0.56));
-        const dataUrl = canvas.toDataURL('image/png').split(',')[1];
-        zip.file(spec.path, dataUrl, { base64: true });
-        existingPaths.add(spec.path);
+        const b64 = await makeIconBase64(size, letter, colors);
+        zip.file(spec.path, b64, { base64: true });
+        existing.set(spec.path, "__binary__");
       }
     }
   }
 
-  // Fallback: if still no icon assets at all, create a single icon.png
   if (opts.addIconsIfMissing && !anyIconAssetPresent()) {
-    const colors = opts.colors || { bg: '#121a34', border: '#7aa2f7', text: '#e6e9f2' };
-    const icons = await generateIconsBase64WithColors(opts.name || 'X', colors);
-    // Use 128px as the single icon size
-    const path = 'icon.png';
-    if (!existingPaths.has(path)) {
-      zip.file(path, icons[128], { base64: true });
-      existingPaths.add(path);
+    const auto = await generateIconsBase64WithColors(opts.name || "X", colors);
+    if (!existing.has("icon.png")) {
+      zip.file("icon.png", auto[128], { base64: true });
+      existing.set("icon.png", "__binary__");
+    }
+
+    // Point manifest to the single icon.png
+    manifest.icons = { 16: "icon.png", 32: "icon.png", 48: "icon.png", 128: "icon.png" };
+    if (manifest.action?.default_icon) manifest.action.default_icon = "icon.png";
+  }
+
+  if (manifest.background?.service_worker === "background.js" && !existing.has("background.js")) {
+    addToZip(zip, existing, "background.js", `chrome.runtime.onInstalled.addListener(()=>console.log('[BG] installed'));`);
+  }
+
+  const declaresPopup = !!manifest.action?.default_popup;
+  if (declaresPopup && !existing.has("popup.html")) {
+    addToZip(
+      zip,
+      existing,
+      "popup.html",
+      `<!doctype html><meta charset="utf-8"><body><h1>${manifest.name || "Popup"}</h1><script src="popup.js"></script></body>`
+    );
+
+    if (!existing.has("popup.js")) {
+      addToZip(zip, existing, "popup.js", `console.log('[Popup] ready');`);
+    }
+
+    if (!existing.has("styles.css")) {
+      addToZip(zip, existing, "styles.css", `body{font:13px system-ui,sans-serif;padding:10px}`);
     }
   }
 
-  // Fix manifest icon paths to use single icon.png
-  if (opts.addIconsIfMissing) {
-    try {
-      const manifestFile = files.find(f => f.path === 'manifest.json');
-      if (manifestFile) {
-        const manifestJson = JSON.parse(manifestFile.content);
-        let manifestUpdated = false;
-        
-        // Fix icons section
-        if (manifestJson.icons) {
-          manifestJson.icons = {
-            16: 'icon.png',
-            32: 'icon.png', 
-            48: 'icon.png',
-            128: 'icon.png'
-          };
-          manifestUpdated = true;
-        }
-        
-        // Fix action default_icon
-        if (manifestJson.action && manifestJson.action.default_icon) {
-          manifestJson.action.default_icon = 'icon.png';
-          manifestUpdated = true;
-        }
-        
-        if (manifestUpdated) {
-          zip.file('manifest.json', JSON.stringify(manifestJson, null, 2));
-        }
-      }
-    } catch {
-      // swallow JSON errors; we only do best-effort fixing
-    }
-  }
+  // --- write back normalized manifest ---
+  addToZip(zip, existing, manPath, JSON.stringify(manifest, null, 2));
 
-  const base = (opts.downloadName ||
-    (opts.name || 'ai-extension')
-      .toLowerCase()
-      .replace(/[^a-z0-9_-]+/g, '-')
-  ).replace(/-+/g, '-');
+  // --- final: build & download ---
+  const base = (opts.downloadName || (opts.name || "ai-extension").toLowerCase().replace(/[^a-z0-9_-]+/g, "-")).replace(/-+/g, "-");
+  const versionSegment = opts.version ? `-${opts.version}` : "";
 
-  const versionSegment = opts.version ? `-${opts.version}` : '';
-
-  const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
+  const blob = await zip.generateAsync({ type: "blob", compression: "DEFLATE" });
   const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
+  const a = document.createElement("a");
   a.href = url;
   a.download = `${base}${versionSegment}-ai.zip`;
   document.body.appendChild(a);
