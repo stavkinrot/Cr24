@@ -76,8 +76,79 @@ html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); f
 /* Assistant attachments (files, etc.) */
 .assistant-attachments { margin-top: 8px; }
 
-/* File list/cards */
-.file-list { display: grid; gap: 8px; margin-top: 6px; }
+/* File bundle - new clean layout */
+.file-bundle {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  overflow: hidden;
+  margin-top: 6px;
+}
+
+.file-bundle-toolbar {
+  display: flex;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(122, 162, 247, 0.05);
+}
+
+.file-list {
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.file-item {
+  display: flex;
+  align-items: center;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.file-item:last-child {
+  border-bottom: none;
+}
+
+.file-item:hover {
+  background: rgba(122, 162, 247, 0.08);
+}
+
+.file-info {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0; /* Allow text truncation */
+}
+
+.file-folder {
+  color: var(--muted);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.file-name {
+  color: var(--accent);
+  text-decoration: none;
+  font-weight: 500;
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.file-name:hover {
+  text-decoration: underline;
+}
+
+.file-size {
+  color: var(--muted);
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+/* Legacy file cards - keeping for backward compatibility */
 .file-card { border: 1px solid var(--border); border-radius: 8px; background: var(--panel); overflow: hidden; }
 .file-card header {
   display: flex; align-items: center; gap: 8px;

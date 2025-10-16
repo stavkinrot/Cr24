@@ -160,7 +160,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       replaceMessage(genThinking, {
         role: 'assistant',
-        html: renderFilesHtml(currentFiles),
+        html: ``,
         attachments: { plan: currentPlan, files: currentFiles },
         actions: { simulate: true, generate: true },
       });
@@ -173,7 +173,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // Messages container: delegate clicks for simulate / generate / include toggles
+  // Messages container: delegate clicks for simulate / generate / download file actions
   on($('#messages')!, 'click', (e: Event) => {
     const t = e.target as HTMLElement;
     if (t.matches('[data-action="simulate"]')) {
@@ -182,6 +182,12 @@ document.addEventListener('DOMContentLoaded', () => {
     } else if (t.matches('[data-action="generate-zip"]')) {
       e.preventDefault();
       handleDownloadZip();
+    } else if (t.matches('[data-action="download-file"]')) {
+      e.preventDefault();
+      const filePath = t.getAttribute('data-file-path');
+      if (filePath) {
+        handleDownloadSingleFile(filePath);
+      }
     } else if (t.matches('[data-toggle-file]')) {
       const path = t.getAttribute('data-toggle-file')!;
       const entry = currentFiles.find(f => f.path === path);
@@ -258,7 +264,21 @@ function renderMessages() {
 
 function renderMessage(m: Msg) {
   const side = m.role === 'user' ? 'right' : 'left';
-  const actions = m.actions ? renderActions(m.actions) : '';
+  // Don't render separate actions if files are present (actions are now in the file bundle toolbar)
+  const actions = (m.actions && !m.attachments?.files) ? renderActions(m.actions) : '';
+  
+  // If we only have file attachments and no meaningful html content, just show the files
+  const hasOnlyFiles = m.attachments?.files && (!m.html || m.html.trim() === '');
+  
+  if (hasOnlyFiles && m.attachments?.files) {
+    return `
+      <article class="bubble ${side}">
+        ${renderFilesSection(m.attachments.files)}
+        ${actions}
+      </article>
+    `;
+  }
+  
   return `
     <article class="bubble ${side}">
       <div class="bubble-inner">${m.html}</div>
@@ -289,8 +309,19 @@ function renderPlanHtml(plan: AIPlan) {
 
 function renderFilesHtml(files: FileEntry[]) {
   if (!files?.length) return `<div>No files generated.</div>`;
-  return `<div class="file-list">
-    ${files.map(renderFileCard).join('')}
+  
+  // Remove duplicates and sort files
+  const uniqueFiles = removeDuplicateFiles(files);
+  const sortedFiles = sortFiles(uniqueFiles);
+  
+  return `<div class="file-bundle">
+    <div class="file-bundle-toolbar">
+      <button class="primary" data-action="simulate">Simulate</button>
+      <button class="secondary" data-action="generate-zip">Download ZIP</button>
+    </div>
+    <div class="file-list">
+      ${sortedFiles.map(renderFileItem).join('')}
+    </div>
   </div>`;
 }
 
@@ -319,6 +350,70 @@ function escapeHtml(s: string) {
   return s.replace(/[&<>"']/g, (c) =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string)
   );
+}
+
+function removeDuplicateFiles(files: FileEntry[]): FileEntry[] {
+  const seen = new Set<string>();
+  return files.filter(file => {
+    if (seen.has(file.path)) {
+      return false;
+    }
+    seen.add(file.path);
+    return true;
+  });
+}
+
+function sortFiles(files: FileEntry[]): FileEntry[] {
+  return files.slice().sort((a, b) => {
+    // manifest.json always first
+    if (a.path === 'manifest.json') return -1;
+    if (b.path === 'manifest.json') return 1;
+    
+    // Then by file type groups
+    const aGroup = getFileGroup(a.path);
+    const bGroup = getFileGroup(b.path);
+    
+    if (aGroup !== bGroup) {
+      return aGroup - bGroup;
+    }
+    
+    // Within same group, sort alphabetically
+    return a.path.localeCompare(b.path);
+  });
+}
+
+function getFileGroup(path: string): number {
+  const ext = path.split('.').pop()?.toLowerCase() || '';
+  
+  if (path === 'manifest.json') return 0;
+  if (ext === 'html') return 1;
+  if (ext === 'css') return 2;
+  if (ext === 'ts' || ext === 'js') return 3;
+  return 4; // everything else
+}
+
+function renderFileItem(f: FileEntry) {
+  const size = new Blob([f.content]).size;
+  const fileName = f.path.split('/').pop() || f.path;
+  const folder = f.path.includes('/') ? f.path.substring(0, f.path.lastIndexOf('/')) : '';
+  
+  return `
+    <div class="file-item">
+      <div class="file-info">
+        ${folder ? `<span class="file-folder">${escapeHtml(folder)}/</span>` : ''}
+        <a href="#" class="file-name" data-action="download-file" data-file-path="${escapeHtml(f.path)}" title="${escapeHtml(f.path)}">
+          ${escapeHtml(fileName)}
+        </a>
+        <span class="file-size">(${formatFileSize(size)})</span>
+      </div>
+    </div>
+  `;
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${Math.round(bytes / (1024 * 1024))} MB`;
 }
 
 /* ---------- textarea autoresize ---------- */
@@ -351,7 +446,6 @@ function restoreSession() {
         role: 'assistant',
         html: `<div class="muted">Restored previous files (last 3 min).</div>`,
         attachments: { files: currentFiles },
-        actions: { simulate: true, generate: true },
       });
     } else {
       localStorage.removeItem('crxgen.session');
@@ -375,6 +469,28 @@ async function handleDownloadZip() {
     pushMessage({ role: 'assistant', html: `<div class="success">ZIP generated and downloaded.</div>` });
   } catch (e: any) {
     pushMessage({ role: 'assistant', html: `<div class="error">ZIP failed: ${escapeHtml(e?.message || String(e))}</div>` });
+  }
+}
+
+function handleDownloadSingleFile(filePath: string) {
+  const file = currentFiles.find(f => f.path === filePath);
+  if (!file) {
+    pushMessage({ role: 'assistant', html: `<div class="error">File not found: ${escapeHtml(filePath)}</div>` });
+    return;
+  }
+  
+  try {
+    const blob = new Blob([file.content], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = file.path.split('/').pop() || file.path;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  } catch (e: any) {
+    pushMessage({ role: 'assistant', html: `<div class="error">Download failed: ${escapeHtml(e?.message || String(e))}</div>` });
   }
 }
 
