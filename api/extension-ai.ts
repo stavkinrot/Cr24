@@ -1,8 +1,7 @@
 // /api/extension-ai (Vercel)
-// Phases: plan | generate | revise
-// - plan:     returns a file plan
-// - generate: returns initial files
-// - revise:   takes {files, feedback} and returns updated files
+// Unified API for context-aware extension generation
+// - New generation: no previousFiles provided
+// - Edit mode: previousFiles provided with file summary
 //
 // Models: gpt-4o-mini, gpt-4o  (you can extend easily)
 // Limits: ≤40 files, ≤400KB total, safe text paths only
@@ -13,6 +12,21 @@ const MODELS = new Set(['gpt-4o-mini', 'gpt-4o']);
 const MAX_FILES = 40;
 const MAX_TOTAL_BYTES = 400 * 1024;
 
+type AIFile = { path: string; content: string };
+type GenerateRequest = {
+  threadId: string;
+  userMessage: string;
+  previousFiles?: AIFile[];
+  filesSummary?: string;
+  model?: string;
+  temperature?: number;
+};
+type GenerateResponse = {
+  files: AIFile[];
+  summary?: string;
+};
+
+// Legacy types for backward compatibility
 type Phase = 'plan' | 'generate' | 'revise';
 
 interface FeatureFlags {
@@ -98,7 +112,7 @@ function validatePlan(obj: any): PlanSchema {
   return obj as PlanSchema;
 }
 
-function validateFilesArray(files: any[]): GeneratedFile[] {
+function validateFilesArray(files: any[], isEdit = false): GeneratedFile[] {
   if (!Array.isArray(files)) throw new Error('files must be array');
   if (files.length === 0) throw new Error('No files returned');
   if (files.length > MAX_FILES) throw new Error('File count exceeds limit');
@@ -115,16 +129,21 @@ function validateFilesArray(files: any[]): GeneratedFile[] {
     if (!approxIsText(f.content)) throw new Error(`File appears non-text: ${f.path}`);
     out.push({ path: f.path, content: f.content });
   }
-  if (!out.some(f => f.path === 'manifest.json')) {
+  
+  // Only require manifest.json for new generation, not for edits
+  if (!isEdit && !out.some(f => f.path === 'manifest.json')) {
     throw new Error('manifest.json missing');
   }
-  // light MV3 sanity (non-fatal, but we try to enforce)
-  try {
-    const manifest = out.find(f => f.path === 'manifest.json')!;
-    const mf = JSON.parse(manifest.content);
-    if (Number(mf.manifest_version) !== 3) throw new Error('manifest_version must be 3');
-  } catch (e: any) {
-    throw new Error(`Invalid manifest.json: ${e?.message || e}`);
+  
+  // light MV3 sanity check only if manifest.json is present
+  const manifest = out.find(f => f.path === 'manifest.json');
+  if (manifest) {
+    try {
+      const mf = JSON.parse(manifest.content);
+      if (Number(mf.manifest_version) !== 3) throw new Error('manifest_version must be 3');
+    } catch (e: any) {
+      throw new Error(`Invalid manifest.json: ${e?.message || e}`);
+    }
   }
   return out;
 }
@@ -137,7 +156,38 @@ function validateGenerate(obj: any): GenerateSchema {
 }
 
 /* ---------- prompts ---------- */
-function buildSystemPrompt(phase: Phase): string {
+function buildSystemPrompt(isEdit: boolean): string {
+  if (isEdit) {
+    return [
+      'You are editing an existing Chrome MV3 extension.',
+      'You will receive the current files and a user message describing changes.',
+      'Return ONLY changed files in JSON format.',
+      'Schema: { "files": [{"path":"string","content":"string"}], "summary":"short changelog" }',
+      'Rules:',
+      '- Return only files that need to change',
+      '- Keep manifest_version at 3',
+      '- Preserve existing functionality unless explicitly asked to change',
+      '- No base64 binaries; text only',
+      'No extra commentary.'
+    ].join(' ');
+  }
+  
+  // New generation
+  return [
+    'You are generating a new Chrome MV3 extension from scratch.',
+    'Return a complete extension bundle in JSON format.',
+    'Schema: { "files": [{"path":"manifest.json","content":"string"}], "summary":"what was created" }',
+    'Rules:',
+    '- Include manifest.json and all necessary files',
+    '- manifest_version must be 3',
+    '- Keep code minimal & self-contained',
+    '- No base64 binaries; text only',
+    'No extra commentary.'
+  ].join(' ');
+}
+
+// Legacy function for backward compatibility
+function buildLegacySystemPrompt(phase: Phase): string {
   if (phase === 'plan') {
     return [
       'You produce ONLY compact JSON for a Chrome MV3 extension plan.',
@@ -225,17 +275,70 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     catch { return error(res, 400, 'Invalid JSON body', undefined, 'BAD_REQUEST'); }
   }
 
+  // Check if this is the new unified API or legacy phase-based API
+  const isNewAPI = body.threadId && body.userMessage;
+  
+  if (isNewAPI) {
+    // New unified API
+    const threadId: string = body.threadId;
+    const userMessage: string = body.userMessage;
+    const previousFiles: AIFile[] | undefined = body.previousFiles;
+    const filesSummary: string | undefined = body.filesSummary;
+    
+    if (!threadId || !userMessage?.trim()) {
+      return error(res, 400, 'threadId and userMessage required', undefined, 'BAD_REQUEST');
+    }
+    
+    const model = pickModel(body.model);
+    const temperature = typeof body.temperature === 'number' ? Math.min(Math.max(body.temperature, 0), 1) : 0.4;
+    
+    try {
+      const isEdit = !!previousFiles;
+      const system = buildSystemPrompt(isEdit);
+      
+      let userPayload: any = {
+        userMessage,
+        threadId
+      };
+      
+      if (isEdit && filesSummary) {
+        userPayload.currentFiles = filesSummary;
+        userPayload.instruction = userMessage;
+      } else {
+        userPayload.prompt = userMessage;
+      }
+      
+      const raw = await openAIChatJson(apiKey, model, temperature, system, userPayload);
+      
+      // Validate response
+      if (!raw.files || !Array.isArray(raw.files)) {
+        throw new Error('Invalid response: files array missing');
+      }
+      
+      const files = validateFilesArray(raw.files, isEdit);
+      const response: GenerateResponse = {
+        files,
+        summary: raw.summary || undefined
+      };
+      
+      return json(res, 200, response);
+      
+    } catch (e: any) {
+      return error(res, 500, 'Generation failed', e?.message, 'GENERATION_ERROR');
+    }
+  }
+  
+  // Legacy phase-based API
   const phase: Phase = body.phase;
   if (phase !== 'plan' && phase !== 'generate' && phase !== 'revise') {
     return error(res, 400, 'phase must be "plan" | "generate" | "revise"', undefined, 'BAD_REQUEST');
   }
 
-  // For plan: require prompt; for generate: require prompt + plan; for revise: require files + feedback
   const model = pickModel(body.model);
   const temperature = typeof body.temperature === 'number' ? Math.min(Math.max(body.temperature, 0), 1) : 0.4;
 
   try {
-    const system = buildSystemPrompt(phase);
+    const system = buildLegacySystemPrompt(phase);
     let userPayload: any = { phase };
 
     if (phase === 'plan') {
@@ -266,7 +369,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!feedback) return error(res, 400, 'feedback required for revise phase', undefined, 'BAD_REQUEST');
 
     // validate incoming files (current state)
-    validateFilesArray(files);
+    validateFilesArray(files, false);
 
     userPayload = {
       phase: 'revise',
