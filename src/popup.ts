@@ -1,6 +1,22 @@
 // popup.ts — Context-aware Chat UI for CRX Generator
 import { generateZipFromFiles } from './generator/index';
 
+// Import preview runner with error handling
+let createPreviewRunner: any = null;
+let PreviewRunner: any = null;
+
+async function loadPreviewModule() {
+  try {
+    const module = await import('./preview/preview-runner.js');
+    createPreviewRunner = module.createPreviewRunner;
+    console.log('Preview module loaded successfully');
+    return true;
+  } catch (error) {
+    console.error('Failed to load preview module:', error);
+    return false;
+  }
+}
+
 type Role = 'user' | 'assistant';
 type Theme = 'light' | 'dark';
 
@@ -97,6 +113,10 @@ let currentFiles: FileEntry[] = [];
 let model: string = 'auto';
 let temperature = 0.4;
 
+// Preview runner state
+let previewRunner: any = null;
+
+
 /* ---------- IndexedDB for bundle persistence ---------- */
 const DB_NAME = 'cr24_bundles';
 const DB_VERSION = 2;
@@ -177,6 +197,114 @@ async function loadBundle(threadId: string): Promise<AIFile[] | null> {
   });
 }
 
+/* ---------- preview management ---------- */
+function updatePreview(): void {
+  console.log('updatePreview called, previewRunner:', !!previewRunner, 'currentFiles:', currentFiles.length);
+  if (!previewRunner) return;
+  
+  // Update chat indicator for current chat
+  const currentChat = allChats.get(currentChatId);
+  if (currentChat) {
+    updatePreviewChatIndicator(currentChat);
+  }
+  
+  if (!currentFiles.length) {
+    // Show placeholder when no files
+    previewRunner.updateBundle([]);
+    return;
+  }
+  
+  const aiFiles = currentFiles
+    .filter(f => f.included !== false)
+    .map(f => ({ path: f.path, content: f.content }));
+  
+  console.log('Filtered aiFiles for preview:', aiFiles.length, aiFiles.map(f => f.path));
+  previewRunner.updateBundle(aiFiles);
+}
+
+function updatePreviewForChat(chatData: ChatData): void {
+  console.log('updatePreviewForChat called for chat:', chatData.id, 'files:', chatData.files.length);
+  if (!previewRunner) return;
+  
+  // Update the chat indicator
+  updatePreviewChatIndicator(chatData);
+  
+  if (!chatData.files || chatData.files.length === 0) {
+    // Show placeholder when no files for this chat
+    previewRunner.updateBundle([]);
+    return;
+  }
+  
+  const aiFiles = chatData.files
+    .filter(f => f.included !== false)
+    .map(f => ({ path: f.path, content: f.content }));
+  
+  console.log('Filtered aiFiles for chat preview:', aiFiles.length, aiFiles.map(f => f.path));
+  previewRunner.updateBundle(aiFiles);
+}
+
+function updatePreviewChatIndicator(chatData: ChatData): void {
+  const indicator = $('#previewChatIndicator');
+  if (!indicator) return;
+  
+  const chatTitle = chatData.title && chatData.title !== 'New Chat'
+    ? chatData.title
+    : `Chat ${chatData.id.substring(0, 8)}`;
+  
+  const fileCount = chatData.files?.length || 0;
+  
+  if (fileCount > 0) {
+    indicator.textContent = `${chatTitle} (${fileCount} files)`;
+    indicator.style.display = 'inline-block';
+    indicator.style.opacity = '1';
+  } else {
+    indicator.textContent = `${chatTitle} (no extension)`;
+    indicator.style.display = 'inline-block';
+    indicator.style.opacity = '0.6';
+  }
+}
+
+async function initializePreview(): Promise<void> {
+  console.log('Initializing preview...');
+  const previewContainer = $('#previewContainer');
+  console.log('Preview container found:', !!previewContainer);
+  if (!previewContainer) {
+    console.warn('Preview container not found');
+    return;
+  }
+  
+  // Load preview module
+  const moduleLoaded = await loadPreviewModule();
+  if (!moduleLoaded || !createPreviewRunner) {
+    console.error('Preview module failed to load');
+    return;
+  }
+  
+  console.log('Creating preview runner...');
+  previewRunner = createPreviewRunner({
+    container: previewContainer,
+    onError: (error: Error) => {
+      console.error('Preview error:', error);
+      pushMessage({
+        role: 'assistant',
+        html: `<div class="error">Preview error: ${escapeHtml(error.message)}</div>`
+      });
+    },
+    onBackgroundMessage: (message: any) => {
+      console.log('Background message:', message);
+      // Could show background script activity in UI
+    }
+  });
+  console.log('Preview runner created:', !!previewRunner);
+}
+
+function cleanupPreview(): void {
+  if (previewRunner) {
+    previewRunner.cleanup();
+    previewRunner = null;
+  }
+}
+
 /* ---------- file operations ---------- */
 function normalizePath(p: string): string {
   return p.replace(/^\.?\/*/, '');
@@ -188,6 +316,52 @@ function mergeChangedFiles(prev: AIFile[], changed: AIFile[]): AIFile[] {
     map.set(normalizePath(c.path), c);
   }
   return Array.from(map.values());
+}
+
+/**
+ * Filters out icon references from manifest.json to prevent binary file generation
+ */
+function filterIconsFromManifest(files: AIFile[]): AIFile[] {
+  return files.map(file => {
+    if (normalizePath(file.path) === 'manifest.json') {
+      try {
+        const manifest = JSON.parse(file.content);
+        
+        // Remove icons from manifest to prevent binary generation
+        if (manifest.icons) {
+          console.log('Removing icons from manifest to prevent binary file generation');
+          delete manifest.icons;
+        }
+        
+        // Remove icon from action if present
+        if (manifest.action && manifest.action.default_icon) {
+          console.log('Removing action icon from manifest');
+          delete manifest.action.default_icon;
+        }
+        
+        // Remove icon from browser_action if present (MV2 compatibility)
+        if (manifest.browser_action && manifest.browser_action.default_icon) {
+          console.log('Removing browser_action icon from manifest');
+          delete manifest.browser_action.default_icon;
+        }
+        
+        // Remove icon from page_action if present (MV2 compatibility)
+        if (manifest.page_action && manifest.page_action.default_icon) {
+          console.log('Removing page_action icon from manifest');
+          delete manifest.page_action.default_icon;
+        }
+        
+        return {
+          ...file,
+          content: JSON.stringify(manifest, null, 2)
+        };
+      } catch (error) {
+        console.warn('Failed to parse manifest.json for icon filtering:', error);
+        return file;
+      }
+    }
+    return file;
+  });
 }
 
 /* ---------- chat management ---------- */
@@ -299,6 +473,67 @@ function updateChatTitle(chatData: ChatData): void {
   }
 }
 
+async function generateExtensionName(files: FileEntry[]): Promise<string | null> {
+  try {
+    // Find manifest.json to understand the extension
+    const manifestFile = files.find(f => normalizePath(f.path) === 'manifest.json');
+    if (!manifestFile) return null;
+    
+    const manifest = JSON.parse(manifestFile.content);
+    const extensionName = manifest.name || 'Extension';
+    const description = manifest.description || '';
+    
+    // Simple name extraction from manifest first
+    if (extensionName && extensionName !== 'Extension' && extensionName.length < 30) {
+      const cleanName = extensionName.replace(/extension|app|chrome/gi, '').trim();
+      if (cleanName.length > 2) {
+        return cleanName;
+      }
+    }
+    
+    // Fallback to description-based name
+    if (description && description.length > 5) {
+      const words = description.split(/\s+/).slice(0, 3);
+      const name = words.join(' ').replace(/[^a-zA-Z0-9\s]/g, '').trim();
+      if (name.length > 2 && name.length < 30) {
+        return name;
+      }
+    }
+    
+    // Default based on file types
+    const hasPopup = files.some(f => f.path.includes('popup'));
+    const hasContent = files.some(f => f.path.includes('content'));
+    const hasBackground = files.some(f => f.path.includes('background') || f.path.includes('service-worker'));
+    
+    if (hasPopup && hasBackground) return 'Popup Extension';
+    if (hasContent) return 'Content Extension';
+    if (hasBackground) return 'Background Extension';
+    
+    return 'Custom Extension';
+  } catch (error) {
+    console.warn('Failed to generate extension name:', error);
+    return 'Extension';
+  }
+}
+
+async function updateChatTitleWithExtension(chatData: ChatData): Promise<void> {
+  try {
+    // Try to generate AI name from extension files
+    if (chatData.files && chatData.files.length > 0) {
+      const aiGeneratedName = await generateExtensionName(chatData.files);
+      if (aiGeneratedName && aiGeneratedName.length > 0) {
+        chatData.title = aiGeneratedName;
+        return;
+      }
+    }
+  } catch (error) {
+    console.warn('Extension name generation failed:', error);
+  }
+  
+  // Fallback to user message based title
+  updateChatTitle(chatData);
+}
+
 async function switchToChat(chatId: string): Promise<void> {
   // Save current chat if it exists
   if (currentChatId && allChats.has(currentChatId)) {
@@ -328,6 +563,9 @@ async function switchToChat(chatId: string): Promise<void> {
   // Update UI
   renderMessages();
   renderChatList();
+  
+  // Update preview with new chat's files
+  updatePreviewForChat(chatData);
 }
 
 function summarizeFiles(files: AIFile[]): string {
@@ -427,7 +665,7 @@ function renderChatList(): void {
 
 function toggleSidebar(show?: boolean): void {
   const sidebar = $('#chat-sidebar')!;
-  const container = $('.chat-container')!;
+  const container = $('.app-container')!
   const isCurrentlyShown = !sidebar.hasAttribute('hidden');
   
   const shouldShow = show !== undefined ? show : !isCurrentlyShown;
@@ -484,6 +722,23 @@ document.addEventListener('DOMContentLoaded', async () => {
     const bundle = await loadBundle(currentChatId);
     if (bundle && bundle.length > 0 && currentFiles.length === 0) {
       currentFiles = bundle.map(f => ({ ...f, included: true }));
+      
+      // Update the current chat's files
+      const currentChat = allChats.get(currentChatId);
+      if (currentChat) {
+        currentChat.files = currentFiles;
+        
+        // Generate AI name for restored bundle if chat still has default title
+        if (currentChat.title === 'New Chat') {
+          await updateChatTitleWithExtension(currentChat);
+          await saveChat(currentChat);
+          renderChatList();
+        }
+      }
+      
+      // Update preview with restored files for this specific chat
+      updatePreview();
+      
       // Show restored files
       pushMessage({
         role: 'assistant',
@@ -498,6 +753,16 @@ document.addEventListener('DOMContentLoaded', async () => {
   
   // Initial render
   renderChatList();
+  
+  // Initialize preview
+  await initializePreview();
+  
+  // Update preview with current chat's files
+  const currentChat = allChats.get(currentChatId);
+  if (currentChat) {
+    updatePreviewForChat(currentChat);
+  }
+  
   
   // Theme
   const themeToggle = $('#themeToggle') as HTMLButtonElement;
@@ -573,6 +838,17 @@ document.addEventListener('DOMContentLoaded', async () => {
   on(closeSidebarBtn, 'click', () => {
     toggleSidebar(false);
   });
+  
+  // Refresh preview button
+  const refreshPreviewBtn = $('#refreshPreview');
+  if (refreshPreviewBtn) {
+    on(refreshPreviewBtn, 'click', () => {
+      if (previewRunner) {
+        previewRunner.refreshPreview();
+      }
+    });
+  }
+  
   
   // Chat list delegation
   on($('#chat-list')!, 'click', async (e: Event) => {
@@ -660,6 +936,9 @@ document.addEventListener('DOMContentLoaded', async () => {
       // Update current files
       currentFiles = newFiles.map(f => ({ ...f, included: true }));
 
+      // Update preview with new files
+      updatePreview();
+
       // Show response - separate summary and files into different messages
       if (response.summary) {
         replaceMessage(thinkingId, {
@@ -692,7 +971,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         
         // Update title if it's still "New Chat"
         if (currentChat.title === 'New Chat') {
-          updateChatTitle(currentChat);
+          await updateChatTitleWithExtension(currentChat);
         }
         
         // Update last message for preview
@@ -745,6 +1024,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         t.textContent = open ? 'View' : 'Hide';
       }
     }
+  });
+  
+  
+  // Cleanup when window is closed
+  window.addEventListener('beforeunload', () => {
+    cleanupPreview();
   });
 });
 
@@ -975,6 +1260,7 @@ function extractContentScriptFromGenerated(files: FileEntry[]): string | null {
           if (file) parts.push(file.content);
         }
       }
+      
       if (parts.length) return parts.join('\n;\n');
     }
   } catch {}
