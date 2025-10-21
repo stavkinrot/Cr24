@@ -151,6 +151,10 @@ html, body {
   justify-content: center;
 }
 
+.chat-item-delete svg {
+  pointer-events: none;
+}
+
 .chat-item-delete:hover {
   color: var(--danger);
   background: rgba(227, 93, 106, 0.1);
@@ -164,12 +168,12 @@ html, body {
 }
 
 .chat-container {
-  width: 360px;
-  height: 520px;
+  width: 380px;
+  height: 540px;
   display: grid;
   grid-template-rows: auto 1fr;
-  gap: 8px;
-  padding: 10px;
+  gap: 12px;
+  padding: 12px;
   transition: margin-left 0.3s ease;
   overflow: hidden;
 }
@@ -186,12 +190,17 @@ html, body {
   top: 0;
   z-index: 10;
   background: var(--bg);
-  padding-bottom: 8px;
+  padding-bottom: 12px;
+  margin: -4px 0 0 0;
 }
-.appbar h1 { margin: 0; font-size: 16px; }
+.appbar h1 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
 .appbar-actions {
   display: flex;
-  gap: 6px;
+  gap: 8px;
   align-items: center;
   justify-content: center;
 }
@@ -201,7 +210,7 @@ html, body {
   height: var(--chat-height);
   display: grid;
   grid-template-rows: 1fr auto;
-  gap: 8px;
+  gap: 12px;
   overflow: hidden;
 }
 
@@ -342,48 +351,112 @@ button:disabled { opacity: .6; cursor: default; }
   display: grid;
   grid-template-columns: auto 1fr auto;
   gap: 8px;
-  align-items: end;
+  align-items: center;
   background: var(--bg);
-  padding-top: 8px;
+  padding: 8px 4px 4px 4px;
+  margin: 0 -4px -4px -4px;
+  min-height: 44px;
 }
 
 .icon-button {
-  width: 34px; height: 34px;
-  display: grid; place-items: center;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   border-radius: 8px;
   border: 1px solid var(--border);
   background: var(--panel);
   color: var(--text);
   cursor: pointer;
-  transition: transform 0.2s ease;
+  transition: all 0.2s ease;
+  min-width: 36px;
+  min-height: 36px;
+  flex-shrink: 0;
 }
 
 .icon-button:hover {
   transform: scale(1.08);
-}
-
-.send-button {
-  background: var(--accent);
-  color: white;
+  background: rgba(122, 162, 247, 0.1);
   border-color: var(--accent);
 }
 
+.icon-button svg {
+  display: block;
+  flex-shrink: 0;
+  pointer-events: none;
+}
+
+/* Composer buttons - larger hit area, no background */
+.composer .icon-button {
+  width: 40px;
+  height: 40px;
+  min-width: 40px;
+  min-height: 40px;
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  transition: all 0.2s ease;
+  border-radius: 50%;
+  position: relative;
+}
+
+.composer .icon-button:hover {
+  background: rgba(122, 162, 247, 0.1);
+  border: none;
+}
+
+.composer .icon-button svg {
+  width: 18px;
+  height: 18px;
+  pointer-events: none;
+}
+
+/* Settings button hover - wheel rotation */
+.composer .icon-button:first-child:hover {
+  transform: rotate(15deg);
+  color: var(--text);
+}
+
+.send-button {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+}
+
 .send-button:hover {
-  background: var(--accent);
-  opacity: 0.9;
+  background: rgba(122, 162, 247, 0.1);
+  border: none;
+  transform: scale(1.1);
+  color: var(--accent);
 }
 
 .composer-input {
   resize: none;
   width: 100%;
   max-height: 180px;
-  min-height: 36px;
-  padding: 8px 10px;
+  min-height: 40px;
+  padding: 10px 12px;
   border-radius: 8px;
   border: 1px solid var(--border);
   background: var(--input-bg);
   color: var(--input-text);
   outline: none;
+  font-size: 13px;
+  line-height: 1.4;
+  overflow-y: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  align-self: center;
+}
+
+.composer-input::-webkit-scrollbar {
+  display: none;
+}
+
+.composer-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px rgba(122, 162, 247, 0.2);
 }
 
 .popover {
@@ -417,3 +490,4 @@ button:disabled { opacity: .6; cursor: default; }
 .file-card pre::-webkit-scrollbar { width: 10px; height: 10px; }
 .messages::-webkit-scrollbar-thumb,
 .file-card pre::-webkit-scrollbar-thumb { background: var(--border); border-radius: 10px; }
+
