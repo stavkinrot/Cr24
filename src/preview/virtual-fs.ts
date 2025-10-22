@@ -5,17 +5,36 @@ export interface VirtualFS {
   rootUrl: string;
   files: Map<string, string>;
   objectUrls: Map<string, string>;
+  previewScripts: {
+    chromeShim: string;
+    domHandlers: string;
+  };
   cleanup(): void;
+}
+
+/**
+ * Gets preview system script URLs as chrome-extension URLs (allowed by manifest CSP)
+ */
+function getPreviewScriptUrls(): { chromeShim: string; domHandlers: string } {
+  return {
+    chromeShim: chrome.runtime.getURL('preview/chrome-shim.js'),
+    domHandlers: chrome.runtime.getURL('preview/dom-handlers.js')
+  };
 }
 
 /**
  * Creates a virtual filesystem from AIFile array using blob URLs
  */
-export function createVirtualFS(files: AIFile[]): VirtualFS {
+export async function createVirtualFS(files: AIFile[]): Promise<VirtualFS> {
   const fileMap = new Map<string, string>();
   const objectUrls = new Map<string, string>();
   
-  // Normalize paths and create blob URLs for each file
+  // Get preview script URLs (chrome-extension://)
+  const previewScriptUrls = getPreviewScriptUrls();
+  
+  console.log('[VirtualFS] Using chrome-extension:// URLs for preview scripts');
+  
+  // Normalize paths and create blob URLs for each extension file
   for (const file of files) {
     const normalizedPath = normalizePath(file.path);
     fileMap.set(normalizedPath, file.content);
@@ -25,6 +44,8 @@ export function createVirtualFS(files: AIFile[]): VirtualFS {
     const blob = new Blob([file.content], { type: mimeType });
     const blobUrl = URL.createObjectURL(blob);
     objectUrls.set(normalizedPath, blobUrl);
+    
+    console.log(`[VirtualFS] Created blob URL for ${normalizedPath}`);
   }
   
   // Create a root blob URL that serves as the base href
@@ -35,6 +56,10 @@ export function createVirtualFS(files: AIFile[]): VirtualFS {
     rootUrl,
     files: fileMap,
     objectUrls,
+    previewScripts: {
+      chromeShim: previewScriptUrls.chromeShim,
+      domHandlers: previewScriptUrls.domHandlers
+    },
     cleanup() {
       // Revoke all object URLs to free memory
       for (const url of objectUrls.values()) {
@@ -110,7 +135,6 @@ export function createPopupHTML(fs: VirtualFS, originalHtml?: string): string {
   <button id="testMessagingBtn">Test Messaging</button>
   <button id="calculateLoveBtn">Calculate Love</button>
   <div id="result"></div>
-  <script src="popup-preview.js"></script>
 </body>
 </html>`;
   }
@@ -120,8 +144,51 @@ export function createPopupHTML(fs: VirtualFS, originalHtml?: string): string {
     html = `<!DOCTYPE html><html><head><title>Extension Popup</title></head><body>${html}</body></html>`;
   }
   
+  // Remove any existing inline event handlers to make CSP compliant
+  html = removeInlineEventHandlers(html);
+  
+  // Remove any existing script tags (they'll be added back as external blob URLs)
+  html = html.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '');
+  
+  // Remove any existing CSP meta tags to avoid conflicts (browser uses the first one)
+  html = html.replace(/<meta[^>]+http-equiv=["']Content-Security-Policy["'][^>]*>/gi, '');
+  
+  // Add CSP meta tag that allows chrome-extension:// and blob: URLs for scripts
+  // Note: blob: for extension files, chrome-extension: for preview system scripts
+  const cspMeta = `<meta http-equiv="Content-Security-Policy" content="script-src 'self' chrome-extension: blob: 'wasm-unsafe-eval'; script-src-elem 'self' chrome-extension: blob: 'wasm-unsafe-eval'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; connect-src http://localhost:* http://127.0.0.1:* ws://localhost:*; object-src 'self'; base-uri 'self';">`;
+  
+  // Add base href and CSP to head
+  if (!html.match(/<base\s+href/i)) {
+    html = html.replace(/(<head[^>]*>)/i, `$1\n<base href="${fs.rootUrl}/">\n${cspMeta}`);
+  } else {
+    html = html.replace(/(<head[^>]*>)/i, `$1\n${cspMeta}`);
+  }
+  
+  // Inject CSS files if they exist
+  const cssFiles = Array.from(fs.files.keys()).filter(path => path.endsWith('.css') && !path.includes('__preview__'));
+  if (cssFiles.length > 0) {
+    const cssLinks = cssFiles.map(cssFile => {
+      const cssUrl = fs.objectUrls.get(cssFile) || cssFile;
+      return `<link rel="stylesheet" href="${cssUrl}">`;
+    }).join('\n');
+    html = html.replace(/(<\/head>)/i, `${cssLinks}\n$1`);
+  }
+  
   // Replace relative asset paths with blob URLs
   html = replaceAssetPaths(html, fs);
+  
+  return html;
+}
+
+/**
+ * Remove inline event handlers to make HTML CSP compliant
+ */
+function removeInlineEventHandlers(html: string): string {
+  // Remove onclick, onload, onerror, etc. attributes
+  html = html.replace(/\s+on\w+\s*=\s*["'][^"']*["']/gi, '');
+  
+  // Remove javascript: URLs
+  html = html.replace(/href\s*=\s*["']javascript:[^"']*["']/gi, 'href="#"');
   
   return html;
 }

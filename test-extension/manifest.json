@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "Test Counter Extension",
+  "version": "1.0",
+  "description": "A simple counter extension for testing preview functionality",
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": "icon.png"
+  },
+  "permissions": [
+    "storage"
+  ]
+}

@@ -1,5 +1,5 @@
 // preview-runner.ts - Fixed preview runner for extensions
-import { createVirtualFS, getFileContent, createPopupHTML, hasBackgroundScript, type VirtualFS, type AIFile } from './virtual-fs.js';
+import { createVirtualFS, getFileContent, getFileUrl, createPopupHTML, hasBackgroundScript, type VirtualFS, type AIFile } from './virtual-fs.js';
 
 export interface PreviewRunner {
   updateBundle(files: AIFile[]): void;
@@ -95,13 +95,49 @@ export function createPreviewRunner(options: PreviewRunnerOptions): PreviewRunne
   }
   
   /**
-   * Creates Chrome API shim script content (to be used in virtual filesystem)
+   * Gets extension JavaScript files and their blob URLs
    */
-  function getChromeShimContent(): string {
-    return `// Chrome API Shim for Extension Preview
+  function getExtensionScripts(fs: VirtualFS): { path: string; blobUrl: string }[] {
+    const scripts: { path: string; blobUrl: string }[] = [];
+    
+    // Look for JavaScript files referenced in manifest or common patterns
+    const scriptFiles = ['popup.js', 'content.js', 'background.js', 'service_worker.js'];
+    
+    for (const scriptFile of scriptFiles) {
+      const content = getFileContent(fs, scriptFile);
+      const blobUrl = fs.objectUrls.get(normalizePath(scriptFile));
+      if (content && blobUrl) {
+        console.log(`[Preview] Found extension script: ${scriptFile}`);
+        scripts.push({ path: scriptFile, blobUrl });
+      }
+    }
+    
+    // Also look for any other .js files in the filesystem (excluding preview scripts)
+    for (const [path, content] of fs.files.entries()) {
+      if (path.endsWith('.js') && 
+          !path.includes('__preview__') && 
+          !scriptFiles.includes(path)) {
+        const blobUrl = fs.objectUrls.get(path);
+        if (blobUrl) {
+          console.log(`[Preview] Found additional script: ${path}`);
+          scripts.push({ path, blobUrl });
+        }
+      }
+    }
+    
+    return scripts;
+  }
+  
+  /**
+   * REMOVED: getChromeShimContent - now loaded from built file
+   * Chrome API shim is now bundled as dist/preview/chrome-shim.js
+   */
+  function getChromeShimContent_DEPRECATED(): string {
+    return `// DEPRECATED: Chrome API Shim now loaded from built file
 (function() {
   'use strict';
   
+  console.log('[DEPRECATED] This inline shim should not be used');
   console.log('Loading Chrome API shim in context:', window.location.href);
   console.log('Document ready state:', document.readyState);
   
@@ -257,10 +293,11 @@ export function createPreviewRunner(options: PreviewRunnerOptions): PreviewRunne
   }
   
   /**
-   * Creates popup preview script content
+   * REMOVED: getPopupPreviewContent - now loaded from built file
+   * DOM handlers are now bundled as dist/preview/dom-handlers.js
    */
-  function getPopupPreviewContent(): string {
-    return `// CSP-compliant popup preview script for extension testing
+  function getPopupPreviewContent_DEPRECATED(): string {
+    return `// DEPRECATED: DOM handlers now loaded from built file
 (function() {
   'use strict';
   
@@ -317,34 +354,39 @@ export function createPreviewRunner(options: PreviewRunnerOptions): PreviewRunne
     }
   }
   
-  // Bind event handlers when DOM is ready
+  // Enhanced event binding with better error handling
   function bindEventHandlers() {
+    console.log('Binding event handlers...');
+    
+    // Bind specific button handlers
     const testStorageBtn = document.getElementById('testStorageBtn');
     const testMessagingBtn = document.getElementById('testMessagingBtn');
     const calculateLoveBtn = document.getElementById('calculateLoveBtn');
     
-    if (testStorageBtn) {
+    if (testStorageBtn && !testStorageBtn._handlerBound) {
       testStorageBtn.addEventListener('click', testStorage);
+      testStorageBtn._handlerBound = true;
       console.log('Bound testStorage handler');
     }
     
-    if (testMessagingBtn) {
+    if (testMessagingBtn && !testMessagingBtn._handlerBound) {
       testMessagingBtn.addEventListener('click', testMessaging);
+      testMessagingBtn._handlerBound = true;
       console.log('Bound testMessaging handler');
     }
     
-    if (calculateLoveBtn) {
+    if (calculateLoveBtn && !calculateLoveBtn._handlerBound) {
       calculateLoveBtn.addEventListener('click', calculateLove);
+      calculateLoveBtn._handlerBound = true;
       console.log('Bound calculateLove handler');
     }
     
-    // Also handle any existing onclick attributes in a CSP-compliant way
+    // Handle any existing onclick attributes in a CSP-compliant way
     const elementsWithOnclick = document.querySelectorAll('[onclick]');
     elementsWithOnclick.forEach(element => {
       const onclickAttr = element.getAttribute('onclick');
-      const elementAny = element;
-      if (onclickAttr && !elementAny._handlerBound) {
-        elementAny._handlerBound = true;
+      if (onclickAttr && !element._handlerBound) {
+        element._handlerBound = true;
         
         // Remove the onclick attribute to avoid CSP violations
         element.removeAttribute('onclick');
@@ -361,6 +403,31 @@ export function createPreviewRunner(options: PreviewRunnerOptions): PreviewRunne
         }
       }
     });
+    
+    // Also bind to any buttons with common patterns
+    const allButtons = document.querySelectorAll('button, input[type="button"], input[type="submit"]');
+    allButtons.forEach(button => {
+      if (!button._handlerBound) {
+        button._handlerBound = true;
+        
+        // Check button text or id for common patterns
+        const text = button.textContent || button.value || '';
+        const id = button.id || '';
+        
+        if (text.toLowerCase().includes('storage') || id.includes('storage')) {
+          button.addEventListener('click', testStorage);
+        } else if (text.toLowerCase().includes('message') || id.includes('message')) {
+          button.addEventListener('click', testMessaging);
+        } else if (text.toLowerCase().includes('love') || id.includes('love')) {
+          button.addEventListener('click', calculateLove);
+        } else if (text.toLowerCase().includes('test') || id.includes('test')) {
+          // Generic test button - try storage first
+          button.addEventListener('click', testStorage);
+        }
+      }
+    });
+    
+    console.log('Event handlers binding complete');
   }
   
   // Initialize when DOM is ready
@@ -370,8 +437,14 @@ export function createPreviewRunner(options: PreviewRunnerOptions): PreviewRunne
     bindEventHandlers();
   }
   
-  // Also bind after a short delay for dynamic content
+  // Also bind after delays for dynamic content
   setTimeout(bindEventHandlers, 100);
+  setTimeout(bindEventHandlers, 500);
+  
+  // Expose functions globally for debugging
+  window.testStorage = testStorage;
+  window.testMessaging = testMessaging;
+  window.calculateLove = calculateLove;
   
 })();`;
   }
@@ -403,100 +476,67 @@ export function createPreviewRunner(options: PreviewRunnerOptions): PreviewRunne
   }
   
   /**
-   * Injects CSP-compliant preview scripts into the virtual filesystem
+   * Helper to normalize paths
    */
-  function injectPreviewScripts(fs: VirtualFS): void {
-    // Add Chrome API shim script
-    const chromeShimContent = getChromeShimContent();
-    const chromeShimBlob = new Blob([chromeShimContent], { type: 'application/javascript' });
-    const chromeShimUrl = URL.createObjectURL(chromeShimBlob);
-    fs.files.set('chrome-shim.js', chromeShimContent);
-    fs.objectUrls.set('chrome-shim.js', chromeShimUrl);
-    
-    // Add popup preview script
-    const popupPreviewContent = getPopupPreviewContent();
-    const popupPreviewBlob = new Blob([popupPreviewContent], { type: 'application/javascript' });
-    const popupPreviewUrl = URL.createObjectURL(popupPreviewBlob);
-    fs.files.set('popup-preview.js', popupPreviewContent);
-    fs.objectUrls.set('popup-preview.js', popupPreviewUrl);
-    
-    console.log('Injected CSP-compliant preview scripts into virtual filesystem');
+  function normalizePath(path: string): string {
+    return path.replace(/^\.?\/*/, '');
   }
+
+  /**
+   * REMOVED: injectPreviewScripts - preview scripts now loaded from built files
+   * Preview scripts are added to VirtualFS during createVirtualFS()
+   */
   
   /**
-   * Creates the popup preview in an iframe
+   * Creates the popup preview in an iframe using Blob URLs with external scripts only
    */
   function createPopupPreview(fs: VirtualFS): void {
-    console.log('Creating popup preview iframe...');
+    console.log('[Preview] Creating popup preview iframe...');
     const iframe = document.createElement('iframe');
     iframe.className = 'preview-iframe';
-    // More permissive sandbox for full functionality
-    iframe.sandbox = 'allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-top-navigation-by-user-activation';
     iframe.style.width = '100%';
     iframe.style.height = '100%';
     iframe.style.border = 'none';
+    // Sandbox the host frame but keep same-origin so it can create blob: iframes
+    iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin');
     
-    // Inject CSP-compliant scripts into the virtual filesystem
-    injectPreviewScripts(fs);
-    
-    // Generate HTML with proper base href and external script references
-    console.log('Generating popup HTML...');
-    let popupHTML = createPopupHTML(fs);
-    console.log('Generated HTML length:', popupHTML.length);
-    
-    // Inject external script references right after <head> opens
-    popupHTML = popupHTML.replace(
-      /(<head[^>]*>)/i,
-      `$1\n<base href="${fs.rootUrl}/">\n<script src="chrome-shim.js"></script>\n<script src="popup-preview.js"></script>`
-    );
-    
-    // Use srcdoc instead of blob URL to avoid CSP issues
-    try {
-      console.log('Setting iframe content with srcdoc...');
-      
-      // Set up load handlers
-      iframe.onload = () => {
-        console.log('Preview iframe loaded successfully');
-        setupIframeMessaging(iframe);
-        
-        // Ensure scripts execute after DOM is ready
-        setTimeout(() => {
+    // Resolve host URL: prefer Vite dev server, fallback to packaged host
+    const resolveHostUrl = async (): Promise<string> => {
+      const candidates = [
+        'http://127.0.0.1:5173/src/preview/preview-host.html',
+        'http://localhost:5173/src/preview/preview-host.html'
+      ];
+      for (const url of candidates) {
+        try {
+          const ctrl = new AbortController();
+          const t = setTimeout(() => ctrl.abort(), 400);
+          const resp = await fetch(url, { method: 'HEAD', mode: 'no-cors', signal: ctrl.signal as any });
+          clearTimeout(t);
+          // no-cors HEAD won't expose ok; assume reachable if no network error
+          return url;
+        } catch {}
+      }
+      return chrome.runtime.getURL('src/preview/preview-host.html');
+    };
+
+    // Load host and post files for previewing
+    (async () => {
+      try {
+        const hostUrl = await resolveHostUrl();
+        iframe.onload = () => {
           try {
-            const iframeWindow = iframe.contentWindow;
-            const iframeDocument = iframe.contentDocument;
-            
-            if (iframeWindow && iframeDocument) {
-              // Reinitialize any event listeners that may have been lost
-              const scripts = iframeDocument.querySelectorAll('script');
-              scripts.forEach((script) => {
-                if (script.textContent && !script.src) {
-                  // Re-execute inline scripts to ensure event handlers are bound
-                  const newScript = iframeDocument.createElement('script');
-                  newScript.textContent = script.textContent;
-                  script.parentNode?.replaceChild(newScript, script);
-                }
-              });
-              
-              console.log('Preview scripts reinitialized');
-            }
+            iframe.contentWindow?.postMessage({ type: 'PREVIEW_FILES', files: Array.from(fs.files.entries()).map(([path, content]) => ({ path, content })) }, '*');
+            setupIframeMessaging(iframe);
           } catch (err) {
-            console.warn('Failed to reinitialize scripts:', err);
+            console.error('[Preview] Failed to post files to host:', err);
           }
-        }, 100);
-      };
-      
-      iframe.onerror = (e) => {
-        console.error('Iframe loading error:', e);
-        showError(new Error('Failed to load preview content'));
-      };
-      
-      // Use srcdoc for better compatibility and script execution
-      iframe.srcdoc = popupHTML;
-      
-    } catch (e) {
-      console.error('Failed to set iframe content:', e);
-      showError(e instanceof Error ? e : new Error(String(e)));
-    }
+        };
+        iframe.src = hostUrl;
+      } catch (e) {
+        console.error('Failed to load preview host:', e);
+        showError(e instanceof Error ? e : new Error(String(e)));
+      }
+    })();
     
     container.innerHTML = '';
     container.appendChild(iframe);
@@ -550,6 +590,18 @@ export function createPreviewRunner(options: PreviewRunnerOptions): PreviewRunne
               return 'chrome-extension://preview-extension/' + path.replace(/^\\/+/, '');
             },
             id: 'preview-extension-id'
+          },
+          onInstalled: {
+            _listeners: [],
+            addListener: function(listener) {
+              this._listeners.push(listener);
+              // Trigger install event once in preview
+              try { listener({ reason: 'install' }); } catch (e) { /* noop */ }
+            },
+            removeListener: function(listener) {
+              const index = this._listeners.indexOf(listener);
+              if (index > -1) this._listeners.splice(index, 1);
+            }
           },
           storage: {
             local: {
@@ -707,42 +759,84 @@ export function createPreviewRunner(options: PreviewRunnerOptions): PreviewRunne
   }
   
   /**
+   * Simulates content script injection into the host page
+   */
+  function simulateContentScript(fs: VirtualFS): void {
+    const manifestContent = getFileContent(fs, 'manifest.json');
+    if (!manifestContent) return;
+    
+    try {
+      const manifest = JSON.parse(manifestContent);
+      const contentScripts = manifest.content_scripts || [];
+      
+      for (const script of contentScripts) {
+        const jsFiles = script.js || [];
+        for (const jsFile of jsFiles) {
+          const scriptContent = getFileContent(fs, jsFile);
+          if (scriptContent) {
+            console.log(`Simulating content script: ${jsFile}`);
+            
+            // Create a script element and inject it into the preview iframe
+            if (currentIframe && currentIframe.contentWindow) {
+              const script = currentIframe.contentDocument?.createElement('script');
+              if (script) {
+                script.textContent = scriptContent;
+                currentIframe.contentDocument?.head.appendChild(script);
+                console.log(`Content script ${jsFile} injected into preview`);
+              }
+            }
+          }
+        }
+      }
+    } catch (error) {
+      console.warn('Failed to simulate content scripts:', error);
+    }
+  }
+  
+  /**
    * Updates the preview with a new bundle
    */
-  function updateBundle(files: AIFile[]): void {
+  async function updateBundle(files: AIFile[]): Promise<void> {
     try {
-      console.log('Preview updateBundle called with files:', files?.length || 0);
+      console.log('[Preview] updateBundle called with files:', files?.length || 0);
       cleanup();
       
       if (!files || files.length === 0) {
-        console.log('No files provided, showing placeholder');
+        console.log('[Preview] No files provided, showing placeholder');
         showPlaceholder();
         return;
       }
       
-      console.log('Creating virtual FS...');
-      currentFS = createVirtualFS(files);
-      console.log('Virtual FS created, files available:', Array.from(currentFS.files.keys()));
+      console.log('[Preview] Creating virtual FS...');
+      currentFS = await createVirtualFS(files);
+      console.log('[Preview] Virtual FS created, files available:', Array.from(currentFS.files.keys()));
       
       // Create message channel for popup-background communication
       messageChannel = new MessageChannel();
       
       // Check if there's a background script
       const backgroundInfo = hasBackgroundScript(currentFS);
-      console.log('Background script info:', backgroundInfo);
+      console.log('[Preview] Background script info:', backgroundInfo);
       
       // Start background worker if needed
       if (backgroundInfo.hasBackground && backgroundInfo.scriptPath) {
-        console.log('Starting background worker...');
+        console.log('[Preview] Starting background worker...');
         startBackgroundWorker(currentFS, backgroundInfo.scriptPath);
       }
       
       // Create popup preview
-      console.log('Creating popup preview...');
+      console.log('[Preview] Creating popup preview...');
       createPopupPreview(currentFS);
       
+      // Simulate content scripts after iframe loads
+      setTimeout(() => {
+        if (currentFS) {
+          simulateContentScript(currentFS);
+        }
+      }, 500);
+      
     } catch (error) {
-      console.error('Failed to update preview:', error);
+      console.error('[Preview] Failed to update preview:', error);
       if (onError) {
         onError(error instanceof Error ? error : new Error(String(error)));
       }

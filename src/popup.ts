@@ -7,12 +7,27 @@ let PreviewRunner: any = null;
 
 async function loadPreviewModule() {
   try {
+    console.log('Attempting to load preview module...');
     const module = await import('./preview/preview-runner.js');
     createPreviewRunner = module.createPreviewRunner;
-    console.log('Preview module loaded successfully');
+    console.log('Preview module loaded successfully:', !!createPreviewRunner);
+    
     return true;
   } catch (error) {
     console.error('Failed to load preview module:', error);
+    
+    // Add visual error indicator
+    const indicator = document.createElement('div');
+    indicator.textContent = 'Preview Module Failed ✗';
+    indicator.style.position = 'fixed';
+    indicator.style.top = '10px';
+    indicator.style.left = '10px';
+    indicator.style.background = 'red';
+    indicator.style.color = 'white';
+    indicator.style.padding = '5px';
+    indicator.style.zIndex = '10000';
+    document.body.appendChild(indicator);
+    
     return false;
   }
 }
@@ -198,9 +213,20 @@ async function loadBundle(threadId: string): Promise<AIFile[] | null> {
 }
 
 /* ---------- preview management ---------- */
-function updatePreview(): void {
+async function updatePreview(): Promise<void> {
   console.log('updatePreview called, previewRunner:', !!previewRunner, 'currentFiles:', currentFiles.length);
-  if (!previewRunner) return;
+  
+  // Add visual debugging
+  const previewContainer = $('#previewContainer');
+  if (previewContainer) {
+    previewContainer.style.border = '2px solid red';
+    previewContainer.style.backgroundColor = '#ff000020';
+  }
+  
+  if (!previewRunner) {
+    console.error('Preview runner not available!');
+    return;
+  }
   
   // Update chat indicator for current chat
   const currentChat = allChats.get(currentChatId);
@@ -209,8 +235,9 @@ function updatePreview(): void {
   }
   
   if (!currentFiles.length) {
+    console.log('No files to preview, showing placeholder');
     // Show placeholder when no files
-    previewRunner.updateBundle([]);
+    await previewRunner.updateBundle([]);
     return;
   }
   
@@ -219,10 +246,11 @@ function updatePreview(): void {
     .map(f => ({ path: f.path, content: f.content }));
   
   console.log('Filtered aiFiles for preview:', aiFiles.length, aiFiles.map(f => f.path));
-  previewRunner.updateBundle(aiFiles);
+  console.log('Calling previewRunner.updateBundle with files:', aiFiles);
+  await previewRunner.updateBundle(aiFiles);
 }
 
-function updatePreviewForChat(chatData: ChatData): void {
+async function updatePreviewForChat(chatData: ChatData): Promise<void> {
   console.log('updatePreviewForChat called for chat:', chatData.id, 'files:', chatData.files.length);
   if (!previewRunner) return;
   
@@ -231,7 +259,7 @@ function updatePreviewForChat(chatData: ChatData): void {
   
   if (!chatData.files || chatData.files.length === 0) {
     // Show placeholder when no files for this chat
-    previewRunner.updateBundle([]);
+    await previewRunner.updateBundle([]);
     return;
   }
   
@@ -240,7 +268,7 @@ function updatePreviewForChat(chatData: ChatData): void {
     .map(f => ({ path: f.path, content: f.content }));
   
   console.log('Filtered aiFiles for chat preview:', aiFiles.length, aiFiles.map(f => f.path));
-  previewRunner.updateBundle(aiFiles);
+  await previewRunner.updateBundle(aiFiles);
 }
 
 function updatePreviewChatIndicator(chatData: ChatData): void {
@@ -273,10 +301,29 @@ async function initializePreview(): Promise<void> {
     return;
   }
   
+  // Add visual debugging to container
+  previewContainer.style.border = '2px solid blue';
+  previewContainer.style.backgroundColor = '#0000ff20';
+  
   // Load preview module
   const moduleLoaded = await loadPreviewModule();
   if (!moduleLoaded || !createPreviewRunner) {
     console.error('Preview module failed to load');
+    
+    // Add error message to the preview container
+    previewContainer.innerHTML = `
+      <div style="padding: 20px; text-align: center; color: red;">
+        <h3>Preview System Error</h3>
+        <p>Failed to load preview module. Check console for details.</p>
+        <button id="reloadButton">Reload Extension</button>
+      </div>
+    `;
+    
+    // Add event listener for reload button
+    const reloadButton = previewContainer.querySelector('#reloadButton');
+    if (reloadButton) {
+      reloadButton.addEventListener('click', () => location.reload());
+    }
     return;
   }
   
@@ -296,6 +343,12 @@ async function initializePreview(): Promise<void> {
     }
   });
   console.log('Preview runner created:', !!previewRunner);
+  
+  
+  // Test the preview immediately
+  console.log('Testing preview with current files...');
+  updatePreview();
+  
 }
 
 function cleanupPreview(): void {
@@ -1137,7 +1190,7 @@ function renderMessage(m: Msg) {
 
 function renderActions(a: NonNullable<Msg['actions']>) {
   const buttons: string[] = [];
-  if (a.simulate) buttons.push(`<button class="secondary" data-action="simulate">Simulate</button>`);
+  // Removed simulate button since live preview is the simulation
   if (a.generate) buttons.push(`<button class="primary" data-action="generate-zip">Generate ZIP</button>`);
   return `<div class="actions">${buttons.join('')}</div>`;
 }
@@ -1150,8 +1203,7 @@ function renderFilesHtml(files: FileEntry[]) {
   
   return `<div class="file-bundle">
     <div class="file-bundle-toolbar">
-      <button class="primary" data-action="simulate">Simulate</button>
-      <button class="secondary" data-action="generate-zip">Download ZIP</button>
+      <button class="primary" data-action="generate-zip">Download ZIP</button>
     </div>
     <div class="file-list">
       ${sortedFiles.map(renderFileItem).join('')}

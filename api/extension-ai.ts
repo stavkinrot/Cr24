@@ -92,6 +92,12 @@ function approxIsText(str: string): boolean {
   }
   return control / len <= 0.05;
 }
+
+function isBinaryFile(path: string): boolean {
+  const ext = path.split('.').pop()?.toLowerCase() || '';
+  const binaryExtensions = ['png', 'jpg', 'jpeg', 'gif', 'svg', 'ico', 'woff', 'woff2', 'ttf', 'otf', 'eot', 'mp3', 'mp4', 'avi', 'mov', 'wav', 'pdf', 'zip', 'tar', 'gz'];
+  return binaryExtensions.includes(ext);
+}
 function extractJsonObject(text: string): any {
   try { return JSON.parse(text); } catch {
     const lastOpen = text.lastIndexOf('{');
@@ -126,7 +132,12 @@ function validateFilesArray(files: any[], isEdit = false): GeneratedFile[] {
     const bytes = Buffer.byteLength(f.content, 'utf8');
     total += bytes;
     if (total > MAX_TOTAL_BYTES) throw new Error('Total size exceeds limit');
-    if (!approxIsText(f.content)) throw new Error(`File appears non-text: ${f.path}`);
+    
+    // Skip text validation for known binary files
+    if (!isBinaryFile(f.path)) {
+      if (!approxIsText(f.content)) throw new Error(`File appears non-text: ${f.path}`);
+    }
+    
     out.push({ path: f.path, content: f.content });
   }
   
