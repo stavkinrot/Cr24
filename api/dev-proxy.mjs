@@ -63,6 +63,12 @@ function approxIsText(str) {
   return control / len <= 0.05;
 }
 
+function isBinaryFile(path) {
+  const ext = path.split('.').pop()?.toLowerCase() || '';
+  const binaryExtensions = ['png', 'jpg', 'jpeg', 'gif', 'svg', 'ico', 'woff', 'woff2', 'ttf', 'otf', 'eot', 'mp3', 'mp4', 'avi', 'mov', 'wav', 'pdf', 'zip', 'tar', 'gz'];
+  return binaryExtensions.includes(ext);
+}
+
 function extractJsonObject(text) {
   try {
     return JSON.parse(text);
@@ -76,7 +82,38 @@ function extractJsonObject(text) {
   }
 }
 
-function buildSystemPrompt(phase) {
+function buildSystemPrompt(isEdit) {
+  if (isEdit) {
+    return [
+      'You are editing an existing Chrome MV3 extension.',
+      'You will receive the current files and a user message describing changes.',
+      'Return ONLY changed files in JSON format.',
+      'Schema: { "files": [{"path":"string","content":"string"}], "summary":"short changelog" }',
+      'Rules:',
+      '- Return only files that need to change',
+      '- Keep manifest_version at 3',
+      '- Preserve existing functionality unless explicitly asked to change',
+      '- No base64 binaries; text only',
+      'No extra commentary.'
+    ].join(' ');
+  }
+  
+  // New generation
+  return [
+    'You are generating a new Chrome MV3 extension from scratch.',
+    'Return a complete extension bundle in JSON format.',
+    'Schema: { "files": [{"path":"manifest.json","content":"string"}], "summary":"what was created" }',
+    'Rules:',
+    '- Include manifest.json and all necessary files',
+    '- manifest_version must be 3',
+    '- Keep code minimal & self-contained',
+    '- No base64 binaries; text only',
+    'No extra commentary.'
+  ].join(' ');
+}
+
+// Legacy function for backward compatibility
+function buildLegacySystemPrompt(phase) {
   if (phase === 'plan') {
     return [
       'You produce ONLY compact JSON for a Chrome MV3 extension plan.',
@@ -133,28 +170,101 @@ function validatePlan(obj) {
   return obj;
 }
 
+function validateFilesArray(files, isEdit = false) {
+  if (!Array.isArray(files)) throw new Error('files must be array');
+  if (files.length === 0) throw new Error('No files returned');
+  if (files.length > MAX_FILES) throw new Error('File count exceeds limit');
+
+  let total = 0;
+  const out = [];
+  for (const f of files) {
+    if (!f || typeof f.path !== 'string' || typeof f.content !== 'string') throw new Error('Invalid file entry');
+    f.path = sanitizePath(f.path);
+    if (!isSafePath(f.path)) throw new Error(`Unsafe path: ${f.path}`);
+    const bytes = Buffer.byteLength(f.content, 'utf8');
+    total += bytes;
+    if (total > MAX_TOTAL_BYTES) throw new Error('Total size exceeds limit');
+    
+    // Skip text validation for known binary files
+    if (!isBinaryFile(f.path)) {
+      if (!approxIsText(f.content)) throw new Error(`File appears non-text: ${f.path}`);
+    }
+    
+    out.push({ path: f.path, content: f.content });
+  }
+  
+  // Only require manifest.json for new generation, not for edits
+  if (!isEdit && !out.some(f => f.path === 'manifest.json')) {
+    throw new Error('manifest.json missing');
+  }
+  return out;
+}
+
 function validateGenerate(obj) {
   if (typeof obj !== 'object' || !obj) throw new Error('Generate result not object');
   if (obj.planVersion !== 1) throw new Error('planVersion must be 1');
-  if (!Array.isArray(obj.files) || obj.files.length === 0) throw new Error('files array invalid');
-  if (obj.files.length > MAX_FILES) throw new Error('File count exceeds limit');
-  let total = 0;
-  obj.files.forEach(f => {
-    f.path = sanitizePath(f.path);
-    if (!isSafePath(f.path)) throw new Error('Unsafe path ' + f.path);
-    const bytes = Buffer.byteLength(f.content || '', 'utf8');
-    total += bytes;
-    if (total > MAX_TOTAL_BYTES) throw new Error('Total size exceeds limit');
-    if (!approxIsText(f.content || '')) throw new Error('Non-text file ' + f.path);
-  });
-  if (!obj.files.some(f => f.path === 'manifest.json')) throw new Error('manifest.json missing');
-  return obj;
+  const files = validateFilesArray(obj.files);
+  return { planVersion: 1, files, notes: obj.notes || [] };
 }
 
 async function handleExtensionAI(req, res, body) {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) return json(res, 500, { error: 'OPENAI_API_KEY missing' });
 
+  // Check if this is the new unified API or legacy phase-based API
+  const isNewAPI = body.threadId && body.userMessage;
+  
+  if (isNewAPI) {
+    // New unified API
+    const threadId = body.threadId;
+    const userMessage = body.userMessage;
+    const previousFiles = body.previousFiles;
+    const filesSummary = body.filesSummary;
+    
+    if (!threadId || !userMessage?.trim()) {
+      return json(res, 400, { error: 'threadId and userMessage required' });
+    }
+    
+    const model = pickModel(body.model);
+    const temperature = typeof body.temperature === 'number' ? Math.min(Math.max(body.temperature, 0), 1) : 0.4;
+    
+    try {
+      const isEdit = !!previousFiles;
+      const system = buildSystemPrompt(isEdit);
+      
+      let userPayload = {
+        userMessage,
+        threadId
+      };
+      
+      if (isEdit && filesSummary) {
+        userPayload.currentFiles = filesSummary;
+        userPayload.instruction = userMessage;
+      } else {
+        userPayload.prompt = userMessage;
+      }
+      
+      const raw = await openAIChatJson(apiKey, model, temperature, system, userPayload);
+      
+      // Validate response
+      if (!raw.files || !Array.isArray(raw.files)) {
+        throw new Error('Invalid response: files array missing');
+      }
+      
+      const files = validateFilesArray(raw.files, isEdit);
+      const response = {
+        files,
+        summary: raw.summary || undefined
+      };
+      
+      return json(res, 200, response);
+      
+    } catch (e) {
+      return json(res, 500, { error: 'Generation failed', detail: e.message });
+    }
+  }
+  
+  // Legacy phase-based API
   const phase = body.phase;
   if (phase !== 'plan' && phase !== 'generate') {
     return json(res, 400, { error: 'phase must be plan or generate' });
@@ -169,7 +279,7 @@ async function handleExtensionAI(req, res, body) {
     ? Math.min(Math.max(body.temperature, 0), 1)
     : 0.4;
 
-  const system = buildSystemPrompt(phase);
+  const system = buildLegacySystemPrompt(phase);
   const userPayload = { phase, prompt, features, matches };
   if (phase === 'generate') {
     if (!body.plan) return json(res, 400, { error: 'plan required for generate phase' });

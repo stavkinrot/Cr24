@@ -16,9 +16,18 @@ export default defineConfig({
     rollupOptions: {
       input: {
         popup: path.resolve(__dirname, 'src/popup.html'),
+        'preview/host': path.resolve(__dirname, 'src/preview/preview-host.html'),
+        'preview/chrome-shim': path.resolve(__dirname, 'src/preview/chrome-shim.ts'),
+        'preview/dom-handlers': path.resolve(__dirname, 'src/preview/dom-handlers.ts'),
       },
       output: {
-        entryFileNames: 'assets/[name].js',
+        entryFileNames: (chunkInfo) => {
+          // Keep preview scripts in preview folder
+          if (chunkInfo.name.startsWith('preview/')) {
+            return '[name].js';
+          }
+          return 'assets/[name].js';
+        },
         chunkFileNames: 'assets/[name]-[hash].js',
         assetFileNames: 'assets/[name]-[hash][extname]',
       },
