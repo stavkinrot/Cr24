@@ -60,3 +60,4 @@ console.log('Chrome storage available:', typeof chrome.storage !== 'undefined');
 chrome.runtime.sendMessage({action: 'test', data: 'Hello from test extension'}, (response) => {
     console.log('Message response:', response);
 });
+

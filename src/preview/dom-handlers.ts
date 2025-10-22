@@ -146,3 +146,4 @@ export function bindPreviewHandlers() {
 // Auto-initialize when script loads
 bindPreviewHandlers();
 
+
