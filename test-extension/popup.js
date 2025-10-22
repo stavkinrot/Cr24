@@ -61,3 +61,4 @@ chrome.runtime.sendMessage({action: 'test', data: 'Hello from test extension'}, 
     console.log('Message response:', response);
 });
 
+
