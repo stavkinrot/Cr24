@@ -219,8 +219,9 @@ async function updatePreview(): Promise<void> {
   // Add visual debugging
   const previewContainer = $('#previewContainer');
   if (previewContainer) {
-    previewContainer.style.border = '2px solid red';
-    previewContainer.style.backgroundColor = '#ff000020';
+    // remove debug styling
+    previewContainer.style.border = '';
+    previewContainer.style.backgroundColor = '';
   }
   
   if (!previewRunner) {
