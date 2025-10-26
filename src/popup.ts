@@ -1264,10 +1264,22 @@ async function handleDownloadZip() {
     pushMessage({ role: 'assistant', html: `<div class="error">No files selected.</div>` });
     return;
   }
+  
+  // Get the current chat title for the zip filename
+  const currentChat = allChats.get(currentChatId);
+  const chatTitle = currentChat?.title && currentChat.title !== 'New Chat'
+    ? currentChat.title
+    : 'AI Extension';
+  
   try {
     await generateZipFromFiles(
       selected.map(f => ({ path: f.path, content: f.content })),
-      { name: 'AI Extension', version: '0.1.0', addIconsIfMissing: true }
+      {
+        name: 'AI Extension',
+        version: '0.1.0',
+        addIconsIfMissing: true,
+        downloadName: chatTitle
+      }
     );
     pushMessage({ role: 'assistant', html: `<div class="success">ZIP generated and downloaded.</div>` });
   } catch (e: any) {

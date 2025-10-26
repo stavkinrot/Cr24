@@ -583,13 +583,12 @@ export async function generateZipFromFiles(
 
   // --- final: build & download ---
   const base = (opts.downloadName || (opts.name || "ai-extension").toLowerCase().replace(/[^a-z0-9_-]+/g, "-")).replace(/-+/g, "-");
-  const versionSegment = opts.version ? `-${opts.version}` : "";
 
   const blob = await zip.generateAsync({ type: "blob", compression: "DEFLATE" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `${base}${versionSegment}-ai.zip`;
+  a.download = `${base}.zip`;
   document.body.appendChild(a);
   a.click();
   a.remove();
