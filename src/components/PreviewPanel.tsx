@@ -16,9 +16,6 @@ const PreviewPanel: React.FC = () => {
     if (!generatedExtension || !iframeRef.current) return;
 
     const iframe = iframeRef.current;
-    const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
-
-    if (!iframeDoc) return;
 
     if (generatedExtension.files['popup.html']) {
       // Render popup
@@ -129,9 +126,16 @@ ${html}
         }
       }
 
-      iframeDoc.open();
-      iframeDoc.write(html);
-      iframeDoc.close();
+      // Use blob URL to bypass CSP restrictions
+      const blob = new Blob([html], { type: 'text/html' });
+      const blobURL = URL.createObjectURL(blob);
+
+      // Clean up previous blob URL if it exists
+      if (iframe.src && iframe.src.startsWith('blob:')) {
+        URL.revokeObjectURL(iframe.src);
+      }
+
+      iframe.src = blobURL;
     } else if (generatedExtension.files['content.js']) {
       // Render content script on demo page
       const demoHTML = `
@@ -181,9 +185,16 @@ ${html}
         </html>
       `;
 
-      iframeDoc.open();
-      iframeDoc.write(demoHTML);
-      iframeDoc.close();
+      // Use blob URL to bypass CSP restrictions
+      const blob = new Blob([demoHTML], { type: 'text/html' });
+      const blobURL = URL.createObjectURL(blob);
+
+      // Clean up previous blob URL if it exists
+      if (iframe.src && iframe.src.startsWith('blob:')) {
+        URL.revokeObjectURL(iframe.src);
+      }
+
+      iframe.src = blobURL;
     }
   };
 
