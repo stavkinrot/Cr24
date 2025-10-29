@@ -7,6 +7,7 @@ const PreviewPanel: React.FC = () => {
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
   useEffect(() => {
+    console.log('PreviewPanel: generatedExtension changed', generatedExtension);
     if (generatedExtension && iframeRef.current) {
       renderPreview();
     }
@@ -19,8 +20,12 @@ const PreviewPanel: React.FC = () => {
 
     // Function to send HTML to sandbox
     const sendToSandbox = (html: string) => {
+      console.log('Sending HTML to sandbox, contentWindow:', iframe.contentWindow);
       if (iframe.contentWindow) {
         iframe.contentWindow.postMessage({ type: 'RENDER_HTML', html }, '*');
+        console.log('HTML sent to sandbox');
+      } else {
+        console.error('No contentWindow available');
       }
     };
 
@@ -151,7 +156,7 @@ if (document.readyState === 'loading') {
       }
 
       // Load sandbox page and send HTML via postMessage
-      if (iframe.src !== chrome.runtime.getURL('sandbox.html')) {
+      if (!iframe.src || !iframe.src.includes('sandbox.html')) {
         iframe.src = chrome.runtime.getURL('sandbox.html');
         // Wait for sandbox to be ready
         const handleMessage = (event: MessageEvent) => {
@@ -163,7 +168,8 @@ if (document.readyState === 'loading') {
         window.addEventListener('message', handleMessage);
       } else {
         // Sandbox already loaded, send HTML directly
-        sendToSandbox(html);
+        // Use small timeout to ensure contentWindow is ready
+        setTimeout(() => sendToSandbox(html), 50);
       }
     } else if (generatedExtension.files['content.js']) {
       // Render content script on demo page
@@ -215,7 +221,7 @@ if (document.readyState === 'loading') {
       `;
 
       // Load sandbox page and send demo HTML via postMessage
-      if (iframe.src !== chrome.runtime.getURL('sandbox.html')) {
+      if (!iframe.src || !iframe.src.includes('sandbox.html')) {
         iframe.src = chrome.runtime.getURL('sandbox.html');
         // Wait for sandbox to be ready
         const handleMessage = (event: MessageEvent) => {
@@ -227,7 +233,8 @@ if (document.readyState === 'loading') {
         window.addEventListener('message', handleMessage);
       } else {
         // Sandbox already loaded, send HTML directly
-        sendToSandbox(demoHTML);
+        // Use small timeout to ensure contentWindow is ready
+        setTimeout(() => sendToSandbox(demoHTML), 50);
       }
     }
   };
