@@ -81,9 +81,17 @@ The extension's manifest CSP (`script-src 'self'`) blocks inline scripts even in
 - Sandbox has its own security context separate from main extension
 
 **Files:**
-- `public/sandbox.html`: Receives HTML via postMessage, renders with document.write()
+- `public/sandbox.html`: Receives HTML via postMessage, renders by updating body.innerHTML
 - `manifest.json`: Declares sandbox page and sandbox-specific CSP policy
 - `vite.config.ts`: Copies sandbox.html to dist/ during build
+
+**Critical: Sandbox Persistence**
+The sandbox.html event listener MUST persist across multiple renders:
+- Event listener is in `<head>` wrapped in IIFE, not in `<body>`
+- Uses `document.body.innerHTML` instead of `document.write()` to preserve listener
+- Scripts are manually re-executed after innerHTML update (innerHTML doesn't auto-execute scripts)
+- DO NOT use `document.write()` or `document.open()` as they destroy the event listener
+- This ensures preview updates correctly when switching between chats
 
 **Why External References Are Stripped:**
 Generated extensions often have `<link rel="stylesheet" href="popup.css">` and `<script src="popup.js">`.
@@ -201,6 +209,8 @@ App
 9. **Extension Persistence**: Extensions are stored per-chat, not globally. Switching chats loads that chat's extension into preview.
 
 10. **Sandbox Communication**: PreviewPanel communicates with sandbox.html via postMessage. Always wait for `SANDBOX_READY` before sending HTML to prevent race conditions.
+
+11. **Sandbox Event Listener Persistence**: The sandbox.html event listener MUST be in `<head>` and use `document.body.innerHTML` (NOT `document.write()`). Using `document.write()` destroys the listener and breaks chat switching.
 
 ## File Generation System
 
