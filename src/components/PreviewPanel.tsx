@@ -126,16 +126,9 @@ ${html}
         }
       }
 
-      // Use blob URL to bypass CSP restrictions
-      const blob = new Blob([html], { type: 'text/html' });
-      const blobURL = URL.createObjectURL(blob);
-
-      // Clean up previous blob URL if it exists
-      if (iframe.src && iframe.src.startsWith('blob:')) {
-        URL.revokeObjectURL(iframe.src);
-      }
-
-      iframe.src = blobURL;
+      // Use srcdoc to bypass CSP restrictions
+      // srcdoc has its own isolated context and doesn't inherit parent CSP
+      iframe.srcdoc = html;
     } else if (generatedExtension.files['content.js']) {
       // Render content script on demo page
       const demoHTML = `
@@ -185,16 +178,9 @@ ${html}
         </html>
       `;
 
-      // Use blob URL to bypass CSP restrictions
-      const blob = new Blob([demoHTML], { type: 'text/html' });
-      const blobURL = URL.createObjectURL(blob);
-
-      // Clean up previous blob URL if it exists
-      if (iframe.src && iframe.src.startsWith('blob:')) {
-        URL.revokeObjectURL(iframe.src);
-      }
-
-      iframe.src = blobURL;
+      // Use srcdoc to bypass CSP restrictions
+      // srcdoc has its own isolated context and doesn't inherit parent CSP
+      iframe.srcdoc = demoHTML;
     }
   };
 
