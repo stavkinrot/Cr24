@@ -29,7 +29,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     // Load data from chrome storage
     chrome.storage.local.get(['chats', 'currentChatId', 'settings'], (result) => {
-      if (result.chats) {
+      if (result.chats && result.chats.length > 0) {
         setChats(result.chats);
         if (result.currentChatId) {
           const chat = result.chats.find((c: Chat) => c.id === result.currentChatId);
@@ -39,8 +39,33 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
             if (chat.generatedExtension) {
               setGeneratedExtension(chat.generatedExtension);
             }
+          } else {
+            // Current chat not found, select the first chat
+            setCurrentChat(result.chats[0]);
+            if (result.chats[0].generatedExtension) {
+              setGeneratedExtension(result.chats[0].generatedExtension);
+            }
+          }
+        } else {
+          // No current chat selected, select the first one
+          setCurrentChat(result.chats[0]);
+          if (result.chats[0].generatedExtension) {
+            setGeneratedExtension(result.chats[0].generatedExtension);
           }
         }
+      } else {
+        // No chats exist, create a new one
+        const newChat: Chat = {
+          id: Date.now().toString(),
+          title: 'New Chat',
+          messages: [],
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          generatedExtension: null,
+        };
+        setChats([newChat]);
+        setCurrentChat(newChat);
+        chrome.storage.local.set({ chats: [newChat], currentChatId: newChat.id });
       }
       if (result.settings) {
         setSettings(result.settings);
