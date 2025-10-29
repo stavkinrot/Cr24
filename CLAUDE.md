@@ -156,3 +156,4 @@ Generated extensions are expected to include:
 The system doesn't validate the generated code - it trusts the AI output and makes it downloadable.
 - add standard git workflow requirements
 - do frequent git commits and never do real editing in the main branch - always use feature branches
+- do all the git management automatically using standard best practices

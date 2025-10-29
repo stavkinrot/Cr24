@@ -1,17 +1,16 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { useChat } from '../context/ChatContext';
 import '../styles/PreviewPanel.css';
 
 const PreviewPanel: React.FC = () => {
   const { generatedExtension } = useChat();
-  const [previewMode, setPreviewMode] = useState<'popup' | 'content'>('popup');
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
   useEffect(() => {
     if (generatedExtension && iframeRef.current) {
       renderPreview();
     }
-  }, [generatedExtension, previewMode]);
+  }, [generatedExtension]);
 
   const renderPreview = () => {
     if (!generatedExtension || !iframeRef.current) return;
@@ -21,7 +20,7 @@ const PreviewPanel: React.FC = () => {
 
     if (!iframeDoc) return;
 
-    if (previewMode === 'popup' && generatedExtension.files['popup.html']) {
+    if (generatedExtension.files['popup.html']) {
       // Render popup
       let html = generatedExtension.files['popup.html'];
 
@@ -44,7 +43,7 @@ const PreviewPanel: React.FC = () => {
       iframeDoc.open();
       iframeDoc.write(html);
       iframeDoc.close();
-    } else if (previewMode === 'content' && generatedExtension.files['content.js']) {
+    } else if (generatedExtension.files['content.js']) {
       // Render content script on demo page
       const demoHTML = `
         <!DOCTYPE html>
@@ -124,20 +123,7 @@ const PreviewPanel: React.FC = () => {
   return (
     <div className="preview-panel">
       <div className="preview-header">
-        <div className="preview-tabs">
-          <button
-            className={`tab ${previewMode === 'popup' ? 'active' : ''}`}
-            onClick={() => setPreviewMode('popup')}
-          >
-            Live Preview
-          </button>
-          <button
-            className="tab"
-            onClick={() => setPreviewMode('content')}
-          >
-            Chat 2f8177f0 (no extension)
-          </button>
-        </div>
+        <h3 className="preview-title">Live Preview</h3>
         <button className="refresh-button" onClick={handleRefresh} title="Refresh">
           ↻
         </button>

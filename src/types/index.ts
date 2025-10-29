@@ -11,6 +11,7 @@ export interface Chat {
   messages: Message[];
   createdAt: number;
   updatedAt: number;
+  generatedExtension?: GeneratedExtension | null;
 }
 
 export interface Settings {

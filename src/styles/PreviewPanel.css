@@ -15,28 +15,11 @@
   border-bottom: 1px solid var(--border-color);
 }
 
-.preview-tabs {
-  display: flex;
-  gap: 8px;
-}
-
-.tab {
-  padding: 8px 16px;
-  border-radius: 6px;
-  font-size: 14px;
-  color: var(--text-secondary);
-  background-color: transparent;
-  transition: all 0.2s;
-}
-
-.tab:hover {
-  background-color: var(--bg-tertiary);
+.preview-title {
+  font-size: 16px;
+  font-weight: 600;
   color: var(--text-primary);
-}
-
-.tab.active {
-  background-color: var(--accent-color);
-  color: white;
+  margin: 0;
 }
 
 .refresh-button {

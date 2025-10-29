@@ -49,6 +49,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       messages: [],
       createdAt: Date.now(),
       updatedAt: Date.now(),
+      generatedExtension: null,
     };
     const updatedChats = [newChat, ...chats];
     setChats(updatedChats);
@@ -61,6 +62,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const chat = chats.find((c) => c.id === chatId);
     if (chat) {
       setCurrentChat(chat);
+      setGeneratedExtension(chat.generatedExtension || null);
       chrome.storage.local.set({ currentChatId: chatId });
     }
   };
@@ -196,6 +198,15 @@ Make sure:
         if (jsonMatch) {
           const extensionData = JSON.parse(jsonMatch[1] || jsonMatch[0]);
           setGeneratedExtension(extensionData);
+
+          // Save extension to the current chat
+          const chatWithExtension = { ...finalChat, generatedExtension: extensionData };
+          setCurrentChat(chatWithExtension);
+          const chatsWithExtension = chats.map((c) =>
+            c.id === currentChat.id ? chatWithExtension : c
+          );
+          setChats(chatsWithExtension);
+          chrome.storage.local.set({ chats: chatsWithExtension });
         }
       } catch (e) {
         console.error('Failed to parse extension data:', e);
