@@ -225,8 +225,9 @@ ${html}
               <iframe
                 ref={iframeRef}
                 className="preview-frame"
-                sandbox="allow-scripts allow-same-origin allow-forms allow-modals"
+                sandbox="allow-scripts allow-same-origin allow-forms allow-modals allow-popups"
                 title="Extension Preview"
+                style={{ pointerEvents: 'auto', cursor: 'auto' }}
               />
             </div>
             <div className="preview-actions">

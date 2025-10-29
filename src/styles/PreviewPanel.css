@@ -78,6 +78,8 @@
   border: 1px solid var(--border-color);
   border-radius: 8px;
   background-color: white;
+  pointer-events: auto;
+  cursor: default;
 }
 
 .preview-empty {
