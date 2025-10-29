@@ -24,20 +24,102 @@ const PreviewPanel: React.FC = () => {
       // Render popup
       let html = generatedExtension.files['popup.html'];
 
+      // Create a complete HTML document structure if it doesn't have one
+      if (!html.includes('<!DOCTYPE') && !html.includes('<html')) {
+        html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Extension Preview</title>
+</head>
+<body>
+${html}
+</body>
+</html>`;
+      }
+
+      // Inject Chrome API mock before any other scripts
+      const chromeApiMock = `
+        <script>
+          // Mock Chrome API for preview
+          window.chrome = window.chrome || {
+            storage: {
+              local: {
+                get: function(keys, callback) {
+                  console.log('chrome.storage.local.get called:', keys);
+                  if (callback) callback({});
+                },
+                set: function(items, callback) {
+                  console.log('chrome.storage.local.set called:', items);
+                  if (callback) callback();
+                },
+                remove: function(keys, callback) {
+                  console.log('chrome.storage.local.remove called:', keys);
+                  if (callback) callback();
+                }
+              },
+              sync: {
+                get: function(keys, callback) {
+                  console.log('chrome.storage.sync.get called:', keys);
+                  if (callback) callback({});
+                },
+                set: function(items, callback) {
+                  console.log('chrome.storage.sync.set called:', items);
+                  if (callback) callback();
+                }
+              }
+            },
+            runtime: {
+              sendMessage: function(message, callback) {
+                console.log('chrome.runtime.sendMessage called:', message);
+                if (callback) callback({});
+              },
+              onMessage: {
+                addListener: function(callback) {
+                  console.log('chrome.runtime.onMessage.addListener called');
+                }
+              }
+            },
+            tabs: {
+              query: function(queryInfo, callback) {
+                console.log('chrome.tabs.query called:', queryInfo);
+                if (callback) callback([]);
+              },
+              create: function(createProperties, callback) {
+                console.log('chrome.tabs.create called:', createProperties);
+                if (callback) callback({});
+              }
+            }
+          };
+        </script>
+      `;
+
+      // Inject Chrome API mock into head
+      if (html.includes('</head>')) {
+        html = html.replace('</head>', `${chromeApiMock}</head>`);
+      } else {
+        html = chromeApiMock + html;
+      }
+
       // Inject CSS if exists
       if (generatedExtension.files['popup.css']) {
-        html = html.replace(
-          '</head>',
-          `<style>${generatedExtension.files['popup.css']}</style></head>`
-        );
+        const cssTag = `<style>${generatedExtension.files['popup.css']}</style>`;
+        if (html.includes('</head>')) {
+          html = html.replace('</head>', `${cssTag}</head>`);
+        } else {
+          html = cssTag + html;
+        }
       }
 
       // Inject JS if exists
       if (generatedExtension.files['popup.js']) {
-        html = html.replace(
-          '</body>',
-          `<script>${generatedExtension.files['popup.js']}</script></body>`
-        );
+        const scriptTag = `<script>${generatedExtension.files['popup.js']}</script>`;
+        if (html.includes('</body>')) {
+          html = html.replace('</body>', `${scriptTag}</body>`);
+        } else {
+          html = html + scriptTag;
+        }
       }
 
       iframeDoc.open();
