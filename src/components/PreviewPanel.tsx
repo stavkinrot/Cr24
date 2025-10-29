@@ -24,6 +24,13 @@ const PreviewPanel: React.FC = () => {
       // Render popup
       let html = generatedExtension.files['popup.html'];
 
+      // Remove external CSS/JS references since we'll inject inline
+      // Remove <link> tags for CSS
+      html = html.replace(/<link[^>]*rel=["']stylesheet["'][^>]*>/gi, '');
+
+      // Remove <script src="..."> tags (but keep inline <script> tags)
+      html = html.replace(/<script[^>]*src=["'][^"']*["'][^>]*>[\s\S]*?<\/script>/gi, '');
+
       // Create a complete HTML document structure if it doesn't have one
       if (!html.includes('<!DOCTYPE') && !html.includes('<html')) {
         html = `<!DOCTYPE html>
