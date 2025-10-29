@@ -55,20 +55,44 @@ The application uses React Context for state management with two main providers:
 
 ### Preview System
 
-The PreviewPanel (`src/components/PreviewPanel.tsx`) has two modes:
+The PreviewPanel (`src/components/PreviewPanel.tsx`) provides a fully interactive preview of generated extensions:
 
-- **Popup Preview**: Injects generated HTML/CSS/JS into an iframe
-- **Content Script Preview**: Simulates content script injection on a demo page with mocked Chrome APIs
+**How it Works:**
+1. Strips external `<link>` and `<script src="">` references from HTML
+2. Injects comprehensive Chrome API mocks (storage, runtime, tabs)
+3. Injects CSS inline in `<head>`
+4. Injects JavaScript inline at end of `<body>`
+5. Renders in iframe with sandbox: `allow-scripts allow-same-origin allow-forms allow-modals allow-popups`
 
-The iframe uses sandbox attributes: `allow-scripts allow-same-origin allow-forms allow-modals`
+**Critical Details:**
+- External file references MUST be removed before injection (they don't exist in iframe context)
+- Chrome API mock loads BEFORE extension scripts to prevent "chrome is not defined" errors
+- Supports both popup and content script extensions automatically
+- Preview is fully interactive - buttons, forms, and event listeners work
+
+**Why External References Are Stripped:**
+Generated extensions often have `<link rel="stylesheet" href="popup.css">` and `<script src="popup.js">`.
+These files don't exist in the iframe, causing:
+- Failed resource loads
+- JavaScript not executing
+- Buttons remaining disabled
+- "No entry" cursor on interactive elements
+
+The regex patterns remove these while preserving inline scripts:
+```javascript
+html.replace(/<link[^>]*rel=["']stylesheet["'][^>]*>/gi, '');
+html.replace(/<script[^>]*src=["'][^"']*["'][^>]*>[\s\S]*?<\/script>/gi, '');
+```
 
 ### Data Persistence
 
 All data is stored in Chrome's local storage:
-- `chats`: Array of chat sessions with messages
+- `chats`: Array of chat sessions with messages AND generated extensions
 - `currentChatId`: ID of the currently active chat
 - `settings`: User's API key, model selection, and temperature
 - `theme`: Current theme preference
+
+**Important**: Each Chat object includes a `generatedExtension` field. When switching chats or reopening the popup, the extension is restored from this field. The preview automatically displays the extension associated with the current chat.
 
 ### File Download System
 
@@ -145,6 +169,12 @@ App
 
 5. **Chrome Storage**: All persistence uses `chrome.storage.local`, not localStorage. Use the Chrome extension context for testing.
 
+6. **Preview External References**: Generated extensions with `<link>` or `<script src="">` tags will fail in preview unless these are stripped. The preview system handles this automatically.
+
+7. **Chat Initialization**: The extension auto-creates a new chat on first open if no chats exist. This prevents empty state confusion.
+
+8. **Extension Persistence**: Extensions are stored per-chat, not globally. Switching chats loads that chat's extension into preview.
+
 ## File Generation System
 
 Generated extensions are expected to include:
@@ -154,6 +184,24 @@ Generated extensions are expected to include:
 - Any additional files specified by the AI
 
 The system doesn't validate the generated code - it trusts the AI output and makes it downloadable.
-- add standard git workflow requirements
-- do frequent git commits and never do real editing in the main branch - always use feature branches
-- do all the git management automatically using standard best practices
+
+## Git Workflow
+
+**Standard Practices:**
+- Always work on feature branches (e.g., `feature/initial-crx-generator`)
+- Never commit directly to `main` branch
+- Make frequent, descriptive commits
+- Use conventional commit messages with co-author attribution
+- All git operations (branch creation, commits) are handled automatically
+
+**Commit Format:**
+```
+Brief description of changes
+
+Detailed explanation of what was changed and why.
+Multiple paragraphs if needed.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-Authored-By: Claude <noreply@anthropic.com>
+```
