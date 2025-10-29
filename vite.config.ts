@@ -12,6 +12,11 @@ export default defineConfig({
         // Copy manifest.json to dist
         copyFileSync('manifest.json', 'dist/manifest.json');
 
+        // Copy sandbox.html to dist
+        if (existsSync('public/sandbox.html')) {
+          copyFileSync('public/sandbox.html', 'dist/sandbox.html');
+        }
+
         // Copy icons folder to dist
         if (!existsSync('dist/icons')) {
           mkdirSync('dist/icons', { recursive: true });

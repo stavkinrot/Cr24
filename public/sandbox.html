@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      overflow: auto;
+    }
+  </style>
+</head>
+<body>
+  <script>
+    // Listen for messages from the parent
+    window.addEventListener('message', function(event) {
+      // Verify origin for security
+      if (event.source !== window.parent) return;
+
+      if (event.data.type === 'RENDER_HTML') {
+        // Clear the document and write new HTML
+        document.open();
+        document.write(event.data.html);
+        document.close();
+      }
+    });
+
+    // Notify parent that sandbox is ready
+    window.parent.postMessage({ type: 'SANDBOX_READY' }, '*');
+  </script>
+</body>
+</html>

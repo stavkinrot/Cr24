@@ -17,6 +17,13 @@ const PreviewPanel: React.FC = () => {
 
     const iframe = iframeRef.current;
 
+    // Function to send HTML to sandbox
+    const sendToSandbox = (html: string) => {
+      if (iframe.contentWindow) {
+        iframe.contentWindow.postMessage({ type: 'RENDER_HTML', html }, '*');
+      }
+    };
+
     if (generatedExtension.files['popup.html']) {
       // Render popup
       let html = generatedExtension.files['popup.html'];
@@ -27,6 +34,9 @@ const PreviewPanel: React.FC = () => {
 
       // Remove <script src="..."> tags (but keep inline <script> tags)
       html = html.replace(/<script[^>]*src=["'][^"']*["'][^>]*>[\s\S]*?<\/script>/gi, '');
+
+      // Remove any CSP meta tags that would block inline scripts
+      html = html.replace(/<meta[^>]*http-equiv=["']Content-Security-Policy["'][^>]*>/gi, '');
 
       // Create a complete HTML document structure if it doesn't have one
       if (!html.includes('<!DOCTYPE') && !html.includes('<html')) {
@@ -42,6 +52,9 @@ ${html}
 </body>
 </html>`;
       }
+
+      // Inject permissive CSP meta tag to allow inline scripts
+      const permissiveCSP = `<meta http-equiv="Content-Security-Policy" content="default-src * 'unsafe-inline' 'unsafe-eval' data: blob:; script-src * 'unsafe-inline' 'unsafe-eval'; style-src * 'unsafe-inline';">`;
 
       // Inject Chrome API mock before any other scripts
       const chromeApiMock = `
@@ -99,11 +112,11 @@ ${html}
         </script>
       `;
 
-      // Inject Chrome API mock into head
+      // Inject permissive CSP and Chrome API mock into head
       if (html.includes('</head>')) {
-        html = html.replace('</head>', `${chromeApiMock}</head>`);
+        html = html.replace('</head>', `${permissiveCSP}${chromeApiMock}</head>`);
       } else {
-        html = chromeApiMock + html;
+        html = permissiveCSP + chromeApiMock + html;
       }
 
       // Inject CSS if exists
@@ -137,9 +150,21 @@ if (document.readyState === 'loading') {
         }
       }
 
-      // Use srcdoc to bypass CSP restrictions
-      // srcdoc has its own isolated context and doesn't inherit parent CSP
-      iframe.srcdoc = html;
+      // Load sandbox page and send HTML via postMessage
+      if (iframe.src !== chrome.runtime.getURL('sandbox.html')) {
+        iframe.src = chrome.runtime.getURL('sandbox.html');
+        // Wait for sandbox to be ready
+        const handleMessage = (event: MessageEvent) => {
+          if (event.data.type === 'SANDBOX_READY') {
+            window.removeEventListener('message', handleMessage);
+            sendToSandbox(html);
+          }
+        };
+        window.addEventListener('message', handleMessage);
+      } else {
+        // Sandbox already loaded, send HTML directly
+        sendToSandbox(html);
+      }
     } else if (generatedExtension.files['content.js']) {
       // Render content script on demo page
       const demoHTML = `
@@ -189,9 +214,21 @@ if (document.readyState === 'loading') {
         </html>
       `;
 
-      // Use srcdoc to bypass CSP restrictions
-      // srcdoc has its own isolated context and doesn't inherit parent CSP
-      iframe.srcdoc = demoHTML;
+      // Load sandbox page and send demo HTML via postMessage
+      if (iframe.src !== chrome.runtime.getURL('sandbox.html')) {
+        iframe.src = chrome.runtime.getURL('sandbox.html');
+        // Wait for sandbox to be ready
+        const handleMessage = (event: MessageEvent) => {
+          if (event.data.type === 'SANDBOX_READY') {
+            window.removeEventListener('message', handleMessage);
+            sendToSandbox(demoHTML);
+          }
+        };
+        window.addEventListener('message', handleMessage);
+      } else {
+        // Sandbox already loaded, send HTML directly
+        sendToSandbox(demoHTML);
+      }
     }
   };
 
@@ -240,7 +277,7 @@ if (document.readyState === 'loading') {
               <iframe
                 ref={iframeRef}
                 className="preview-frame"
-                sandbox="allow-scripts allow-same-origin allow-forms allow-modals allow-popups"
+                sandbox="allow-scripts allow-forms allow-modals allow-popups"
                 title="Extension Preview"
                 style={{ pointerEvents: 'auto', cursor: 'auto' }}
               />
