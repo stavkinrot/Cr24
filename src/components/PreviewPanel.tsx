@@ -118,7 +118,18 @@ ${html}
 
       // Inject JS if exists
       if (generatedExtension.files['popup.js']) {
-        const scriptTag = `<script>${generatedExtension.files['popup.js']}</script>`;
+        // Wrap in DOMContentLoaded to ensure DOM is ready (mimics defer behavior)
+        const wrappedJS = `
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', function() {
+    ${generatedExtension.files['popup.js']}
+  });
+} else {
+  // DOM already loaded
+  ${generatedExtension.files['popup.js']}
+}
+`;
+        const scriptTag = `<script>${wrappedJS}</script>`;
         if (html.includes('</body>')) {
           html = html.replace('</body>', `${scriptTag}</body>`);
         } else {
