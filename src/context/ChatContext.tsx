@@ -33,7 +33,13 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setChats(result.chats);
         if (result.currentChatId) {
           const chat = result.chats.find((c: Chat) => c.id === result.currentChatId);
-          setCurrentChat(chat || null);
+          if (chat) {
+            setCurrentChat(chat);
+            // Load the extension from the chat if it exists
+            if (chat.generatedExtension) {
+              setGeneratedExtension(chat.generatedExtension);
+            }
+          }
         }
       }
       if (result.settings) {
