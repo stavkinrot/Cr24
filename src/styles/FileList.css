@@ -1,0 +1,61 @@
+.file-list {
+  margin-top: 12px;
+  padding: 12px;
+  background-color: var(--bg-secondary);
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+}
+
+.download-zip-button {
+  width: 100%;
+  padding: 10px 16px;
+  margin-bottom: 12px;
+  background-color: var(--accent-color);
+  color: white;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  transition: all 0.2s;
+}
+
+.download-zip-button:hover {
+  background-color: var(--accent-hover);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px var(--shadow);
+}
+
+.files {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.file-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background-color: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  text-align: left;
+  transition: all 0.2s;
+  cursor: pointer;
+}
+
+.file-item:hover {
+  background-color: var(--bg-tertiary);
+  border-color: var(--accent-color);
+  transform: translateX(4px);
+}
+
+.file-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--accent-color);
+}
+
+.file-size {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
