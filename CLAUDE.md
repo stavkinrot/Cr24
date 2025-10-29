@@ -55,20 +55,35 @@ The application uses React Context for state management with two main providers:
 
 ### Preview System
 
-The PreviewPanel (`src/components/PreviewPanel.tsx`) provides a fully interactive preview of generated extensions:
+The PreviewPanel (`src/components/PreviewPanel.tsx`) provides a fully interactive preview of generated extensions using Chrome's sandboxed pages feature:
 
 **How it Works:**
-1. Strips external `<link>` and `<script src="">` references from HTML
-2. Injects comprehensive Chrome API mocks (storage, runtime, tabs)
-3. Injects CSS inline in `<head>`
-4. Injects JavaScript inline at end of `<body>`
-5. Renders in iframe with sandbox: `allow-scripts allow-same-origin allow-forms allow-modals allow-popups`
+1. Loads `sandbox.html` in an iframe via `chrome.runtime.getURL('sandbox.html')`
+2. Prepares generated extension HTML:
+   - Strips external `<link>` and `<script src="">` references from HTML
+   - Strips any existing CSP meta tags that would block inline scripts
+   - Injects permissive CSP meta tag (`unsafe-inline`, `unsafe-eval`)
+   - Injects comprehensive Chrome API mocks (storage, runtime, tabs)
+   - Injects CSS inline in `<head>`
+   - Injects JavaScript wrapped in DOMContentLoaded at end of `<body>`
+3. Sends prepared HTML to sandbox via `postMessage` API
+4. Sandbox receives HTML and renders it using `document.write()`
+5. JavaScript executes fully with no CSP restrictions
 
-**Critical Details:**
-- External file references MUST be removed before injection (they don't exist in iframe context)
-- Chrome API mock loads BEFORE extension scripts to prevent "chrome is not defined" errors
-- Supports both popup and content script extensions automatically
-- Preview is fully interactive - buttons, forms, and event listeners work
+**Critical CSP Solution:**
+The extension's manifest CSP (`script-src 'self'`) blocks inline scripts even in iframes. Chrome extensions cannot use `'unsafe-inline'` in manifest v3 for extension_pages.
+
+**Solution: Sandboxed Pages**
+- Created `public/sandbox.html` - a dedicated sandboxed page
+- Declared in manifest.json with `"sandbox": { "pages": ["sandbox.html"] }`
+- Sandboxed pages can have relaxed CSP with `'unsafe-inline'` and `'unsafe-eval'`
+- Communication via `postMessage` API between PreviewPanel and sandbox
+- Sandbox has its own security context separate from main extension
+
+**Files:**
+- `public/sandbox.html`: Receives HTML via postMessage, renders with document.write()
+- `manifest.json`: Declares sandbox page and sandbox-specific CSP policy
+- `vite.config.ts`: Copies sandbox.html to dist/ during build
 
 **Why External References Are Stripped:**
 Generated extensions often have `<link rel="stylesheet" href="popup.css">` and `<script src="popup.js">`.
@@ -82,7 +97,15 @@ The regex patterns remove these while preserving inline scripts:
 ```javascript
 html.replace(/<link[^>]*rel=["']stylesheet["'][^>]*>/gi, '');
 html.replace(/<script[^>]*src=["'][^"']*["'][^>]*>[\s\S]*?<\/script>/gi, '');
+html.replace(/<meta[^>]*http-equiv=["']Content-Security-Policy["'][^>]*>/gi, '');
 ```
+
+**Technical Details:**
+- Iframe sandbox attributes: `allow-scripts allow-forms allow-modals allow-popups`
+- NO `allow-same-origin` (prevents CSP inheritance from parent)
+- Chrome API mock loads BEFORE extension scripts to prevent "chrome is not defined" errors
+- Supports both popup and content script extensions automatically
+- Preview is fully interactive - buttons, forms, and event listeners work without CSP violations
 
 ### Data Persistence
 
@@ -171,9 +194,13 @@ App
 
 6. **Preview External References**: Generated extensions with `<link>` or `<script src="">` tags will fail in preview unless these are stripped. The preview system handles this automatically.
 
-7. **Chat Initialization**: The extension auto-creates a new chat on first open if no chats exist. This prevents empty state confusion.
+7. **Preview CSP**: The live preview uses a sandboxed page (`sandbox.html`) to bypass CSP restrictions. Do NOT modify the manifest CSP or remove the sandbox declaration - this is critical for preview interactivity.
 
-8. **Extension Persistence**: Extensions are stored per-chat, not globally. Switching chats loads that chat's extension into preview.
+8. **Chat Initialization**: The extension auto-creates a new chat on first open if no chats exist. This prevents empty state confusion.
+
+9. **Extension Persistence**: Extensions are stored per-chat, not globally. Switching chats loads that chat's extension into preview.
+
+10. **Sandbox Communication**: PreviewPanel communicates with sandbox.html via postMessage. Always wait for `SANDBOX_READY` before sending HTML to prevent race conditions.
 
 ## File Generation System
 
