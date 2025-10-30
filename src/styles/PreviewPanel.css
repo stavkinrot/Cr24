@@ -102,6 +102,9 @@
   padding: var(--spacing-sm);
   border-top: 1px solid var(--border-color);
   background-color: var(--bg-primary);
+  min-height: 72px;
+  display: flex;
+  align-items: center;
 }
 
 .download-extension-button {
