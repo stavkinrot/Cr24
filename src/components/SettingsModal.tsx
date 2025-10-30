@@ -46,12 +46,9 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
               onChange={(e) => setModel(e.target.value as any)}
               className="setting-select"
             >
-              <option value="gpt-5">GPT-5 (Latest)</option>
-              <option value="gpt-4o">GPT-4o (Recommended)</option>
-              <option value="gpt-4o-mini">GPT-4o Mini (Faster & Cheaper)</option>
-              <option value="gpt-4-turbo">GPT-4 Turbo</option>
-              <option value="gpt-4">GPT-4</option>
-              <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
+              <option value="gpt-5">GPT-5 (Default)</option>
+              <option value="gpt-4.1">GPT-4.1</option>
+              <option value="gpt-4o">GPT-4o</option>
             </select>
           </div>
 

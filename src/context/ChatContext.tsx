@@ -21,8 +21,8 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [chats, setChats] = useState<Chat[]>([]);
   const [settings, setSettings] = useState<Settings>({
     apiKey: '',
-    model: 'gpt-4o',
-    temperature: 0.7,
+    model: 'gpt-5',
+    temperature: 1.0,
   });
   const [generatedExtension, setGeneratedExtension] = useState<GeneratedExtension | null>(null);
 
