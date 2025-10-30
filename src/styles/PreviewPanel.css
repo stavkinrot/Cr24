@@ -108,26 +108,45 @@
 }
 
 .download-extension-button {
+  position: relative;
+  overflow: hidden;
+  white-space: nowrap;
   width: 100%;
   padding: 10px var(--spacing-sm);
-  background-color: var(--text-secondary);
-  color: white;
+  background: linear-gradient(160deg, #9ca0a8, #71757e, #5a5f68);
+  color: #1a1c1f;
+  border: 0;
   border-radius: var(--radius-sm);
   font-size: 14px;
-  font-weight: 600;
-  transition: all var(--transition-base);
-  box-shadow: var(--shadow-2);
+  font-weight: 700;
+  letter-spacing: 0.2px;
   cursor: pointer;
-  border: none;
+  box-shadow: 0 4px 14px rgba(31,34,37,0.25), inset 0 1px 0 rgba(255,255,255,0.4);
+  transition: transform 0.08s ease, filter 0.2s ease;
 }
 
 .download-extension-button:hover {
-  background-color: var(--text-primary);
-  transform: translateY(-1px);
-  box-shadow: var(--shadow-3);
+  filter: saturate(1.05) brightness(1.08);
 }
 
 .download-extension-button:active {
-  transform: translateY(0);
-  box-shadow: var(--shadow-1);
+  transform: translateY(1px);
+}
+
+.download-extension-button::before {
+  content: "";
+  position: absolute;
+  top: -100%;
+  left: -40%;
+  height: 300%;
+  width: 40%;
+  background: linear-gradient(120deg, transparent 0%, rgba(255,255,255,0.25) 45%, rgba(255,255,255,0.45) 50%, rgba(255,255,255,0.25) 55%, transparent 100%);
+  transform: rotate(20deg);
+  animation: shine 3s linear infinite;
+  pointer-events: none;
+}
+
+@keyframes shine {
+  0% { left: -60%; }
+  100% { left: 140%; }
 }

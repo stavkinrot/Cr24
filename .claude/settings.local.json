@@ -13,7 +13,8 @@
       "Read(//e/User/UserFiles/word-replacer-2/**)",
       "Read(//e/User/UserFiles/word-replacer-3/**)",
       "Read(//e/User/UserFiles/word-rep/**)",
-      "Read(//e/User/UserFiles/Love Calculator/**)"
+      "Read(//e/User/UserFiles/Love Calculator/**)",
+      "Read(//e/User/UserFiles/chromatic-word-replacer/**)"
     ],
     "deny": [],
     "ask": []
