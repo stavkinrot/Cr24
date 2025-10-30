@@ -805,24 +805,6 @@ if (document.readyState === 'loading') {
     renderPreview();
   };
 
-  const handleDownload = () => {
-    if (!generatedExtension) return;
-
-    // Create a zip file (simplified - using JSZip would be better)
-    const files = { ...generatedExtension.files, 'manifest.json': JSON.stringify(generatedExtension.manifest, null, 2) };
-
-    // For now, download as individual files
-    Object.entries(files).forEach(([filename, content]) => {
-      const blob = new Blob([content], { type: 'text/plain' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      a.click();
-      URL.revokeObjectURL(url);
-    });
-  };
-
   return (
     <div className="preview-panel">
       <div className="preview-header">
@@ -849,16 +831,6 @@ if (document.readyState === 'loading') {
                   maxHeight: '100%'
                 }}
               />
-            </div>
-            <div className="preview-actions">
-              <button className="action-button primary" onClick={handleDownload}>
-                Download Extension
-              </button>
-              <button className="action-button" onClick={() => {
-                navigator.clipboard.writeText(JSON.stringify(generatedExtension, null, 2));
-              }}>
-                Copy Code
-              </button>
             </div>
           </>
         ) : (
