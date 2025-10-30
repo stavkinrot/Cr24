@@ -172,20 +172,80 @@ const PreviewPanel: React.FC = () => {
               `;
 
               // Execute using func instead of files
-              // We can't use eval due to CSP, so we inject the code via script element
-              result = await chrome.scripting.executeScript({
-                target: injectionDetails.target,
-                func: (code: string) => {
-                  const script = document.createElement('script');
-                  script.textContent = code;
-                  (document.head || document.documentElement).appendChild(script);
-                  script.remove();
-                },
-                args: [wrappedCode],
-                world: injectionDetails.world || 'MAIN',
-                injectImmediately: injectionDetails.injectImmediately
-              });
-              console.log('File-based executeScript completed, result:', result);
+              // Try MAIN world first, fallback to ISOLATED world for ultra-strict CSP sites
+              try {
+                // Try MAIN world first (allows full page interaction)
+                result = await chrome.scripting.executeScript({
+                  target: injectionDetails.target,
+                  func: (code: string) => {
+                    // Try Function constructor first (works on most sites)
+                    try {
+                      new Function(code)();
+                      return { success: true, method: 'Function', world: 'MAIN' };
+                    } catch (e1) {
+                      // Fallback 1: Try script element (works on sites without Trusted Types)
+                      try {
+                        const script = document.createElement('script');
+                        script.textContent = code;
+                        (document.head || document.documentElement).appendChild(script);
+                        script.remove();
+                        return { success: true, method: 'script', world: 'MAIN' };
+                      } catch (e2) {
+                        // Fallback 2: Try blob URL (works on some strict CSP sites)
+                        try {
+                          const blob = new Blob([code], { type: 'text/javascript' });
+                          const url = URL.createObjectURL(blob);
+                          const script = document.createElement('script');
+                          script.src = url;
+                          (document.head || document.documentElement).appendChild(script);
+                          script.onload = () => URL.revokeObjectURL(url);
+                          script.remove();
+                          return { success: true, method: 'blob', world: 'MAIN' };
+                        } catch (e3) {
+                          return { success: false, errors: [(e1 as Error)?.message, (e2 as Error)?.message, (e3 as Error)?.message] };
+                        }
+                      }
+                    }
+                  },
+                  args: [wrappedCode],
+                  world: 'MAIN',
+                  injectImmediately: injectionDetails.injectImmediately
+                });
+
+                // Check if all methods failed in MAIN world
+                if (result && result[0]?.result?.success === false) {
+                  console.warn('⚠️ MAIN world injection failed, trying ISOLATED world...');
+                  // Fallback to ISOLATED world (has relaxed CSP but limited page access)
+                  result = await chrome.scripting.executeScript({
+                    target: injectionDetails.target,
+                    func: (code: string) => {
+                      // In ISOLATED world, Function constructor usually works
+                      try {
+                        new Function(code)();
+                        return { success: true, method: 'Function', world: 'ISOLATED' };
+                      } catch (error) {
+                        return { success: false, world: 'ISOLATED', error: (error as Error)?.message };
+                      }
+                    },
+                    args: [wrappedCode],
+                    world: 'ISOLATED',
+                    injectImmediately: injectionDetails.injectImmediately
+                  });
+
+                  // If ISOLATED world also failed, show helpful error
+                  if (result && result[0]?.result?.success === false) {
+                    console.error('❌ Content script injection failed in both MAIN and ISOLATED worlds.');
+                    console.error('This page has ultra-strict CSP (Content Security Policy) that blocks all dynamic script injection.');
+                    console.error('Sites like LinkedIn require Trusted Types and cannot support dynamically generated extensions.');
+                    console.error('The extension will work on most other sites (Wikipedia, GitHub, etc.)');
+                  }
+                }
+
+                console.log('File-based executeScript completed, result:', result);
+              } catch (error) {
+                console.error('executeScript failed:', error);
+                throw error;
+              }
             } else {
               // Pass through func-based injections unchanged
               result = await chrome.scripting.executeScript(injectionDetails);
@@ -315,20 +375,73 @@ const PreviewPanel: React.FC = () => {
 })();
       `;
 
-      // Inject the content script using script element (avoid CSP eval restriction)
-      await chrome.scripting.executeScript({
+      // Inject the content script with fallback to ISOLATED world for ultra-strict CSP
+      let injectionResult = await chrome.scripting.executeScript({
         target: { tabId: tab.id, allFrames: manifest?.content_scripts?.[0]?.all_frames || false },
         func: (scriptCode: string) => {
-          // Inject via script element to avoid CSP eval restriction
-          const script = document.createElement('script');
-          script.textContent = scriptCode;
-          (document.head || document.documentElement).appendChild(script);
-          script.remove();
-          console.log('Content script injected successfully');
+          // Try multiple injection methods to handle different CSP configurations
+          try {
+            new Function(scriptCode)();
+            console.log('Content script injected successfully via Function (MAIN)');
+            return { success: true, method: 'Function', world: 'MAIN' };
+          } catch (e1) {
+            try {
+              const script = document.createElement('script');
+              script.textContent = scriptCode;
+              (document.head || document.documentElement).appendChild(script);
+              script.remove();
+              console.log('Content script injected successfully via script element (MAIN)');
+              return { success: true, method: 'script', world: 'MAIN' };
+            } catch (e2) {
+              try {
+                const blob = new Blob([scriptCode], { type: 'text/javascript' });
+                const url = URL.createObjectURL(blob);
+                const script = document.createElement('script');
+                script.src = url;
+                (document.head || document.documentElement).appendChild(script);
+                script.onload = () => URL.revokeObjectURL(url);
+                script.remove();
+                console.log('Content script injected successfully via blob (MAIN)');
+                return { success: true, method: 'blob', world: 'MAIN' };
+              } catch (e3) {
+                console.error('All MAIN world injection methods failed');
+                return { success: false, world: 'MAIN' };
+              }
+            }
+          }
         },
         args: [wrappedCode],
         world: 'MAIN'
       });
+
+      // If MAIN world failed, try ISOLATED world
+      if (injectionResult && injectionResult[0]?.result?.success === false) {
+        console.warn('⚠️ MAIN world injection failed, trying ISOLATED world for content script...');
+        const isolatedResult = await chrome.scripting.executeScript({
+          target: { tabId: tab.id, allFrames: manifest?.content_scripts?.[0]?.all_frames || false },
+          func: (scriptCode: string) => {
+            try {
+              new Function(scriptCode)();
+              console.log('Content script injected successfully via Function (ISOLATED)');
+              return { success: true, method: 'Function', world: 'ISOLATED' };
+            } catch (error) {
+              console.error('ISOLATED world injection also failed:', error);
+              return { success: false, world: 'ISOLATED', error: (error as Error)?.message };
+            }
+          },
+          args: [wrappedCode],
+          world: 'ISOLATED'
+        });
+
+        // If ISOLATED world also failed, show helpful error
+        if (isolatedResult && isolatedResult[0]?.result?.success === false) {
+          console.error('❌ Content script injection failed in both MAIN and ISOLATED worlds.');
+          console.error('⚠️ This page has ultra-strict CSP that blocks all dynamic script injection.');
+          console.error('📝 Sites like LinkedIn, Twitter, and some banking sites require Trusted Types.');
+          console.error('✅ The extension will work on most other sites (Wikipedia, GitHub, news sites, etc.)');
+          console.error('💡 Tip: Download the generated extension and install it as a regular Chrome extension to bypass these restrictions.');
+        }
+      }
 
       console.log('Content script injected successfully');
     } catch (error) {

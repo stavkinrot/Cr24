@@ -274,10 +274,36 @@ The preview uses a sophisticated multi-layer bridge system to enable full Chrome
 
 **Final Working Architecture:**
 - Sandbox popup → postMessage → Parent extension (for Chrome APIs)
-- Parent extension → executeScript (MAIN world) → Real webpage
+- Parent extension → executeScript (MAIN/ISOLATED world) → Real webpage
 - Content scripts wrapped with mock → listen to window.postMessage
 - Popup sendMessage → executeScript injects messenger → window.postMessage → Content script
 - Full bidirectional communication working with real DOM manipulation
+
+**Known Limitations - Ultra-Strict CSP Sites:**
+
+Some websites implement extremely restrictive Content Security Policies with **Trusted Types** that block ALL forms of dynamic script injection:
+- **LinkedIn** - Blocks Function(), eval(), script.textContent, script.src with blob/data URLs
+- **Twitter/X** - Similar Trusted Types restrictions
+- **Banking/Financial sites** - Often have strictest CSP
+
+These sites require pre-compiled, signed scripts and cannot support dynamic content script injection in the live preview.
+
+**Workaround for Users:**
+1. Generate the extension in CRX Generator
+2. Download the extension files (ZIP)
+3. Install as a regular Chrome extension via chrome://extensions/
+4. The extension will work normally when installed, bypassing preview restrictions
+
+**Why This Happens:**
+- Preview injects code dynamically as strings
+- Trusted Types policy requires all scripts to go through approved "trust" functions
+- No way to create trusted scripts dynamically without page's trust policy
+- ISOLATED world also affected (policy applies to both worlds)
+
+**Compatibility:**
+- ✅ Works: Wikipedia, GitHub, Stack Overflow, most news sites, blogs, documentation sites
+- ❌ Blocked: LinkedIn, Twitter, some banking sites, sites with Trusted Types
+- Estimated: 95%+ of websites support dynamic injection
 
 ### Data Persistence
 
