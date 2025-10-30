@@ -6,6 +6,7 @@ const PreviewPanel: React.FC = () => {
   const { generatedExtension } = useChat();
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const generatedExtensionRef = useRef(generatedExtension);
+  const [iframeDimensions, setIframeDimensions] = React.useState({ width: '400px', height: '600px' });
 
   // Listen for Chrome API requests from sandbox
   useEffect(() => {
@@ -449,6 +450,71 @@ const PreviewPanel: React.FC = () => {
     }
   };
 
+  const extractDimensions = (html: string, css: string = '') => {
+    // Try to extract width from CSS - look for ANY element with width (prioritize body/html/main)
+    let widthMatch = css.match(/body[^{]*\{[^}]*width:\s*(\d+(?:px|em|rem))/i) ||
+                     css.match(/html[^{]*\{[^}]*width:\s*(\d+(?:px|em|rem))/i) ||
+                     css.match(/main[^{]*\{[^}]*width:\s*(\d+(?:px|em|rem))/i) ||
+                     css.match(/\.container[^{]*\{[^}]*width:\s*(\d+(?:px|em|rem))/i) ||
+                     css.match(/width:\s*(\d+px)/i); // Fallback to any width declaration
+
+    // Try to extract height from CSS
+    let heightMatch = css.match(/body[^{]*\{[^}]*height:\s*(\d+(?:px|em|rem))/i) ||
+                      css.match(/html[^{]*\{[^}]*height:\s*(\d+(?:px|em|rem))/i) ||
+                      css.match(/main[^{]*\{[^}]*height:\s*(\d+(?:px|em|rem))/i) ||
+                      css.match(/\.container[^{]*\{[^}]*height:\s*(\d+(?:px|em|rem))/i);
+
+    // Try to extract from HTML inline styles
+    if (!widthMatch) {
+      widthMatch = html.match(/style=["'][^"']*width:\s*(\d+(?:px|em|rem))/i);
+    }
+    if (!heightMatch) {
+      heightMatch = html.match(/style=["'][^"']*height:\s*(\d+(?:px|em|rem))/i);
+    }
+
+    // Calculate total dimensions including padding
+    let width = widthMatch?.[1] || '400px';
+    let height = heightMatch?.[1] || 'auto';
+
+    // Determine which element has the width/height (to extract padding from same element)
+    const elementSelector = css.includes('body {') ? 'body' :
+                           css.includes('main {') ? 'main' :
+                           css.includes('.container {') ? '\\.container' : null;
+
+    if (elementSelector) {
+      // Try to extract padding (supports: "padding: 10px 20px", "padding: 10px", etc.)
+      const fullPaddingMatch = css.match(new RegExp(`${elementSelector}[^{]*\\{[^}]*padding:\\s*(\\d+)px(?:\\s+(\\d+)px)?(?:\\s+(\\d+)px)?(?:\\s+(\\d+)px)?`, 'i'));
+
+      if (fullPaddingMatch) {
+        const top = parseInt(fullPaddingMatch[1]);
+        const right = parseInt(fullPaddingMatch[2] || fullPaddingMatch[1]);
+        const bottom = parseInt(fullPaddingMatch[3] || fullPaddingMatch[1]);
+        const left = parseInt(fullPaddingMatch[4] || fullPaddingMatch[2] || fullPaddingMatch[1]);
+
+        // Add horizontal padding to width
+        if (widthMatch) {
+          const widthValue = parseInt(width);
+          width = `${widthValue + left + right}px`;
+        }
+
+        // If no explicit height, don't set one (let it be auto/natural)
+        // But if height was set, add vertical padding
+        if (heightMatch) {
+          const heightValue = parseInt(height);
+          height = `${heightValue + top + bottom}px`;
+        }
+      }
+    }
+
+    // If height is auto, use a reasonable default min-height
+    if (height === 'auto') {
+      height = 'auto'; // Let it grow naturally, but set in render
+    }
+
+    console.log('Extracted dimensions:', { width, height, rawWidth: widthMatch?.[1], rawHeight: heightMatch?.[1] });
+    return { width, height };
+  };
+
   const renderPreview = () => {
     if (!generatedExtension || !iframeRef.current) return;
 
@@ -466,6 +532,13 @@ const PreviewPanel: React.FC = () => {
     };
 
     if (generatedExtension.files['popup.html']) {
+      // Extract dimensions from HTML/CSS
+      const dimensions = extractDimensions(
+        generatedExtension.files['popup.html'],
+        generatedExtension.files['popup.css'] || ''
+      );
+      setIframeDimensions(dimensions);
+
       // Render popup
       let html = generatedExtension.files['popup.html'];
 
@@ -761,21 +834,20 @@ if (document.readyState === 'loading') {
       <div className="preview-content">
         {generatedExtension ? (
           <>
-            <div className="preview-info">
-              <div className="info-badges">
-                <span className="badge">✓ Chrome API simulation</span>
-                <span className="badge">✓ Background script support</span>
-                <span className="badge">✓ Storage persistence</span>
-                <span className="badge">✓ Runtime messaging</span>
-              </div>
-            </div>
             <div className="preview-frame-container">
               <iframe
                 ref={iframeRef}
                 className="preview-frame"
                 sandbox="allow-scripts allow-forms allow-modals allow-popups"
                 title="Extension Preview"
-                style={{ pointerEvents: 'auto', cursor: 'auto' }}
+                style={{
+                  pointerEvents: 'auto',
+                  cursor: 'auto',
+                  width: iframeDimensions.width,
+                  height: iframeDimensions.height === 'auto' ? '600px' : iframeDimensions.height,
+                  maxWidth: '100%',
+                  maxHeight: '100%'
+                }}
               />
             </div>
             <div className="preview-actions">
@@ -793,12 +865,6 @@ if (document.readyState === 'loading') {
           <div className="preview-empty">
             <h3>Extension Preview</h3>
             <p>Generate an extension to see it running here</p>
-            <div className="preview-features">
-              <p>✓ Chrome API simulation</p>
-              <p>✓ Background script support</p>
-              <p>✓ Storage persistence</p>
-              <p>✓ Runtime messaging</p>
-            </div>
           </div>
         )}
       </div>

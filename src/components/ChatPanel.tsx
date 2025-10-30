@@ -52,9 +52,9 @@ const ChatPanel: React.FC = () => {
     if (!input.trim() || isLoading) return;
 
     setIsLoading(true);
+    setInput(''); // Clear input immediately for better UX
     try {
       await sendMessage(input);
-      setInput('');
     } catch (error) {
       console.error('Error in handleSend:', error);
     } finally {
@@ -80,16 +80,53 @@ const ChatPanel: React.FC = () => {
         )}
         {currentChat?.messages.map((message) => {
           const extension = messageExtensions.get(message.id) || parseExtensionFromMessage(message.content);
-          const displayText = message.role === 'assistant' && extension
-            ? getMessageSummary(message.content)
-            : message.content;
+
+          // Use displayContent if available (summary only), otherwise use full content
+          const displayText = message.displayContent || (
+            message.role === 'assistant' && extension
+              ? getMessageSummary(message.content)
+              : message.content
+          );
+
+          // Check if we're showing progress stages (GPT-5 non-streaming)
+          // Use message.isGenerating instead of isLoading for persistence across chat switches
+          const isShowingProgressStages = message.progressStage !== undefined && message.isGenerating;
+
+          // Show progress indicator when generating code (after summary is shown)
+          const showProgressIndicator = message.isGenerating && !isShowingProgressStages;
+
+          // Show initial streaming indicator for empty assistant messages (no progress stages yet)
+          const isInitialStreaming = message.role === 'assistant' &&
+            message.content === '' &&
+            !message.displayContent &&
+            isLoading; // Only use isLoading for the very first moment
 
           return (
             <div key={message.id} className={`message message-${message.role}`}>
               <div className="message-content">
-                <div className="message-text">{displayText}</div>
-                {message.role === 'assistant' && extension && (
-                  <FileList extension={extension} />
+                {isShowingProgressStages ? (
+                  <div className="progress-stage">
+                    <div className="progress-stage-indicator">
+                      <span className="progress-spinner">⏳</span>
+                      <span className="progress-stage-text">{displayText}</span>
+                    </div>
+                  </div>
+                ) : isInitialStreaming ? (
+                  <div className="message-text streaming">
+                    <span className="streaming-indicator">●</span> Thinking...
+                  </div>
+                ) : (
+                  <>
+                    <div className="message-text">{displayText}</div>
+                    {showProgressIndicator && (
+                      <div className="progress-indicator">
+                        <span className="progress-spinner">⏳</span> Generating extension files...
+                      </div>
+                    )}
+                    {message.role === 'assistant' && extension && !showProgressIndicator && (
+                      <FileList extension={extension} chatTitle={currentChat?.title} />
+                    )}
+                  </>
                 )}
                 <div className="message-time">
                   {new Date(message.timestamp).toLocaleTimeString()}
@@ -98,13 +135,6 @@ const ChatPanel: React.FC = () => {
             </div>
           );
         })}
-        {isLoading && (
-          <div className="message message-assistant">
-            <div className="message-content">
-              <div className="message-text loading">Generating extension...</div>
-            </div>
-          </div>
-        )}
         <div ref={messagesEndRef} />
       </div>
       <div className="input-container">

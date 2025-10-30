@@ -130,29 +130,34 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setChats(updatedChats);
     chrome.storage.local.set({ chats: updatedChats });
 
-    // Call OpenAI API
+    // Create placeholder assistant message for streaming
+    const assistantMessageId = (Date.now() + 1).toString();
+    const assistantMessage: Message = {
+      id: assistantMessageId,
+      role: 'assistant',
+      content: '',
+      timestamp: Date.now(),
+    };
+
+    const messagesWithAssistant = [...updatedMessages, assistantMessage];
+    const chatWithAssistant = { ...updatedChat, messages: messagesWithAssistant };
+    setCurrentChat(chatWithAssistant);
+
+    // Call OpenAI API with streaming (disabled for GPT-5 due to organization verification requirement)
     try {
-      console.log('Calling OpenAI API with model:', settings.model);
+      // GPT-5 only supports temperature of 1
+      const effectiveTemperature = settings.model === 'gpt-5' ? 1 : settings.temperature;
+
+      // GPT-5 requires organization verification for streaming, so disable it
+      const useStreaming = settings.model !== 'gpt-5';
+
+      console.log('Calling OpenAI API with model:', settings.model, useStreaming ? '(streaming enabled)' : '(streaming disabled)');
       console.log('API Key starts with:', settings.apiKey.substring(0, 10) + '...');
 
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minute timeout
 
-      // GPT-5 only supports temperature of 1
-      const effectiveTemperature = settings.model === 'gpt-5' ? 1 : settings.temperature;
-
-      const response = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${settings.apiKey}`,
-        },
-        body: JSON.stringify({
-          model: settings.model,
-          messages: [
-            {
-              role: 'system',
-              content: `You are an expert Chrome extension developer. Generate complete, working Chrome extension code based on user requirements.
+      const systemPrompt = `You are an expert Chrome extension developer. Generate complete, working Chrome extension code based on user requirements.
 
 IMPORTANT: Your response should have TWO parts:
 
@@ -186,11 +191,25 @@ Make sure:
 - The summary is conversational and explains what you built
 - All code is production-ready and follows Chrome extension best practices
 - Include all necessary files (HTML, CSS, JS)
-- Use manifest version 3`,
+- Use manifest version 3`;
+
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${settings.apiKey}`,
+        },
+        body: JSON.stringify({
+          model: settings.model,
+          messages: [
+            {
+              role: 'system',
+              content: systemPrompt,
             },
             ...updatedMessages.map((m) => ({ role: m.role, content: m.content })),
           ],
           temperature: effectiveTemperature,
+          stream: useStreaming,
         }),
         signal: controller.signal,
       });
@@ -205,33 +224,212 @@ Make sure:
         throw new Error(errorData.error?.message || 'API request failed');
       }
 
-      const data = await response.json();
-      console.log('OpenAI response:', data);
+      let accumulatedContent = '';
+      let isGeneratingCode = false; // Track if we've entered the code block
 
-      const assistantMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        role: 'assistant',
-        content: data.choices[0].message.content,
-        timestamp: Date.now(),
-      };
+      if (useStreaming) {
+        // Process streaming response
+        const reader = response.body?.getReader();
+        const decoder = new TextDecoder();
 
-      const finalMessages = [...updatedMessages, assistantMessage];
-      const finalChat = { ...updatedChat, messages: finalMessages };
-      setCurrentChat(finalChat);
+        if (!reader) {
+          throw new Error('Response body reader not available');
+        }
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          const chunk = decoder.decode(value, { stream: true });
+          const lines = chunk.split('\n').filter(line => line.trim() !== '');
+
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const data = line.slice(6);
+
+              if (data === '[DONE]') {
+                console.log('Stream completed');
+                break;
+              }
+
+              try {
+                const parsed = JSON.parse(data);
+                const delta = parsed.choices[0]?.delta?.content;
+
+                if (delta) {
+                  accumulatedContent += delta;
+
+                  // Check if we've hit the code block marker
+                  if (accumulatedContent.includes('```json')) {
+                    isGeneratingCode = true;
+                  }
+
+                  // Extract summary (everything before ```json)
+                  const summaryEndIndex = accumulatedContent.indexOf('```json');
+                  const displayContent = summaryEndIndex !== -1
+                    ? accumulatedContent.substring(0, summaryEndIndex).trim()
+                    : accumulatedContent;
+
+                  // Update the assistant message in real-time with ONLY summary text
+                  const updatedAssistantMessage: Message = {
+                    ...assistantMessage,
+                    content: accumulatedContent, // Store full content
+                    displayContent: displayContent, // But only display summary
+                    isGenerating: isGeneratingCode, // Flag for UI to show progress indicator
+                  };
+
+                  const updatedMessages = messagesWithAssistant.map(m =>
+                    m.id === assistantMessageId ? updatedAssistantMessage : m
+                  );
+
+                  const updatedChat = {
+                    ...chatWithAssistant,
+                    messages: updatedMessages,
+                    updatedAt: Date.now(),
+                  };
+
+                  setCurrentChat(updatedChat);
+
+                  // Update chats array
+                  const updatedChatsArray = chats.map((c) =>
+                    c.id === currentChat.id ? updatedChat : c
+                  );
+                  setChats(updatedChatsArray);
+                }
+              } catch (e) {
+                console.error('Error parsing stream chunk:', e);
+              }
+            }
+          }
+        }
+
+        console.log('Final accumulated content length:', accumulatedContent.length);
+      } else {
+        // Non-streaming response (for GPT-5)
+        // Show progress stages to provide feedback during long wait (up to 6 minutes)
+        const progressStages = [
+          { delay: 0, message: 'Analyzing your requirements...' },
+          { delay: 8000, message: 'Designing extension architecture...' },
+          { delay: 20000, message: 'Planning file structure...' },
+          { delay: 35000, message: 'Generating manifest.json...' },
+          { delay: 55000, message: 'Creating popup interface...' },
+          { delay: 80000, message: 'Writing HTML markup...' },
+          { delay: 110000, message: 'Styling with CSS...' },
+          { delay: 145000, message: 'Implementing core JavaScript logic...' },
+          { delay: 185000, message: 'Adding Chrome API integration...' },
+          { delay: 230000, message: 'Implementing event handlers...' },
+          { delay: 275000, message: 'Optimizing and testing code...' },
+          { delay: 320000, message: 'Finalizing extension files...' },
+          { delay: 350000, message: 'Almost ready, just a moment longer...' },
+        ];
+
+        // Helper function to update progress stage
+        const updateProgressStage = (stage: { message: string }, index: number) => {
+          const updatedAssistantMessage: Message = {
+            ...assistantMessage,
+            content: '',
+            displayContent: stage.message,
+            isGenerating: true,
+            progressStage: index,
+          };
+
+          const updatedMessages = messagesWithAssistant.map(m =>
+            m.id === assistantMessageId ? updatedAssistantMessage : m
+          );
+
+          const updatedChat = {
+            ...chatWithAssistant,
+            messages: updatedMessages,
+            updatedAt: Date.now(),
+          };
+
+          setCurrentChat(updatedChat);
+
+          // Also update chats array for persistence
+          const updatedChatsArray = chats.map((c) =>
+            c.id === currentChat.id ? updatedChat : c
+          );
+          setChats(updatedChatsArray);
+        };
+
+        // Show first stage immediately
+        updateProgressStage(progressStages[0], 0);
+
+        // Start progress stage updates for remaining stages
+        const progressIntervals: number[] = [];
+        progressStages.slice(1).forEach((stage, index) => {
+          const timeoutId = window.setTimeout(() => {
+            updateProgressStage(stage, index + 1);
+          }, stage.delay);
+
+          progressIntervals.push(timeoutId);
+        });
+
+        // Wait for API response
+        const data = await response.json();
+        console.log('OpenAI response:', data);
+        accumulatedContent = data.choices[0].message.content;
+
+        // Clear all pending progress intervals
+        progressIntervals.forEach(id => clearTimeout(id));
+
+        // Extract summary for non-streaming too
+        const summaryEndIndex = accumulatedContent.indexOf('```json');
+        const displayContent = summaryEndIndex !== -1
+          ? accumulatedContent.substring(0, summaryEndIndex).trim()
+          : accumulatedContent;
+
+        // Update the assistant message with complete content
+        const updatedAssistantMessage: Message = {
+          ...assistantMessage,
+          content: accumulatedContent,
+          displayContent: displayContent,
+          isGenerating: summaryEndIndex !== -1, // Show progress indicator while we parse
+        };
+
+        const updatedMessages = messagesWithAssistant.map(m =>
+          m.id === assistantMessageId ? updatedAssistantMessage : m
+        );
+
+        const updatedChat = {
+          ...chatWithAssistant,
+          messages: updatedMessages,
+          updatedAt: Date.now(),
+        };
+
+        setCurrentChat(updatedChat);
+      }
+
+      // Save final state to storage (clear isGenerating flag)
+      const summaryEndIndex = accumulatedContent.indexOf('```json');
+      const finalDisplayContent = summaryEndIndex !== -1
+        ? accumulatedContent.substring(0, summaryEndIndex).trim()
+        : accumulatedContent;
+
+      const finalMessages = messagesWithAssistant.map(m =>
+        m.id === assistantMessageId
+          ? { ...m, content: accumulatedContent, displayContent: finalDisplayContent, isGenerating: false }
+          : m
+      );
+      const finalChat = { ...chatWithAssistant, messages: finalMessages };
       const finalChats = chats.map((c) => (c.id === currentChat.id ? finalChat : c));
       setChats(finalChats);
       chrome.storage.local.set({ chats: finalChats });
 
       // Try to parse and extract extension code
       try {
-        const jsonMatch = assistantMessage.content.match(/```json\n([\s\S]*?)\n```/) ||
-          assistantMessage.content.match(/\{[\s\S]*\}/);
+        const jsonMatch = accumulatedContent.match(/```json\n([\s\S]*?)\n```/) ||
+          accumulatedContent.match(/\{[\s\S]*\}/);
         if (jsonMatch) {
           const extensionData = JSON.parse(jsonMatch[1] || jsonMatch[0]);
           setGeneratedExtension(extensionData);
 
-          // Save extension to the current chat
-          const chatWithExtension = { ...finalChat, generatedExtension: extensionData };
+          // Use the manifest name as the chat title
+          const chatTitle = extensionData.manifest?.name || currentChat.title;
+          console.log('Updated chat title from manifest:', chatTitle);
+
+          // Save extension to the current chat with updated title
+          const chatWithExtension = { ...finalChat, generatedExtension: extensionData, title: chatTitle };
           setCurrentChat(chatWithExtension);
           const chatsWithExtension = chats.map((c) =>
             c.id === currentChat.id ? chatWithExtension : c

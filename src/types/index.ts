@@ -3,6 +3,9 @@ export interface Message {
   role: 'user' | 'assistant' | 'system';
   content: string;
   timestamp: number;
+  displayContent?: string; // Summary text to display (excludes code block)
+  isGenerating?: boolean; // True when streaming code generation
+  progressStage?: number; // Progress stage index for non-streaming models
 }
 
 export interface Chat {

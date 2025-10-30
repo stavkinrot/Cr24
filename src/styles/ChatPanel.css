@@ -75,10 +75,86 @@
   animation: dots 1.5s infinite;
 }
 
+.message-text.streaming {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+.streaming-indicator {
+  display: inline-block;
+  animation: pulse 1.5s ease-in-out infinite;
+  color: var(--accent-color);
+}
+
+.progress-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 12px 16px;
+  background-color: var(--bg-primary);
+  border-radius: 8px;
+  color: var(--text-secondary);
+  font-size: 14px;
+  border: 1px solid var(--border-color);
+}
+
+.progress-stage {
+  width: 100%;
+}
+
+.progress-stage-indicator {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 20px;
+  background: linear-gradient(135deg, var(--bg-primary) 0%, var(--bg-secondary) 100%);
+  border-radius: 12px;
+  border: 2px solid var(--accent-color);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.progress-stage-text {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--text-primary);
+  flex: 1;
+}
+
+.progress-spinner {
+  display: inline-block;
+  animation: rotate 2s linear infinite;
+  font-size: 20px;
+  flex-shrink: 0;
+}
+
 @keyframes dots {
   0%, 20% { content: '.'; }
   40% { content: '..'; }
   60%, 100% { content: '...'; }
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.5;
+    transform: scale(1.2);
+  }
+}
+
+@keyframes rotate {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .message-time {

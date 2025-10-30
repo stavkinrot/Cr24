@@ -5,9 +5,10 @@ import '../styles/FileList.css';
 
 interface FileListProps {
   extension: GeneratedExtension;
+  chatTitle?: string;
 }
 
-const FileList: React.FC<FileListProps> = ({ extension }) => {
+const FileList: React.FC<FileListProps> = ({ extension, chatTitle }) => {
   const downloadFile = (filename: string, content: string) => {
     const blob = new Blob([content], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
@@ -29,12 +30,26 @@ const FileList: React.FC<FileListProps> = ({ extension }) => {
       zip.file(filename, content);
     });
 
+    // Generate a filename from chat title or use default
+    const sanitizeFilename = (name: string) => {
+      // Remove invalid filename characters and limit length
+      return name
+        .replace(/[<>:"/\\|?*]/g, '')
+        .replace(/\s+/g, '-')
+        .substring(0, 50)
+        .toLowerCase();
+    };
+
+    const zipFilename = chatTitle
+      ? `${sanitizeFilename(chatTitle)}.zip`
+      : 'chrome-extension.zip';
+
     // Generate and download zip
     const blob = await zip.generateAsync({ type: 'blob' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'chrome-extension.zip';
+    a.download = zipFilename;
     a.click();
     URL.revokeObjectURL(url);
   };

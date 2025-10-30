@@ -34,7 +34,11 @@ The application uses React Context for state management with two main providers:
    - Handles settings (API key, model selection, temperature)
    - Stores and retrieves data from Chrome's `chrome.storage.local`
    - Parses AI responses to extract generated extension code (JSON format)
-   - **Critical**: GPT-5 only supports temperature of 1.0, so the code automatically overrides user temperature settings when GPT-5 is selected
+   - **Streaming Responses**: Uses OpenAI's streaming API for real-time text generation (disabled for GPT-5)
+   - **Critical GPT-5 Constraints**:
+     - Only supports temperature of 1.0 (automatically enforced)
+     - Streaming disabled due to organization verification requirement
+     - Falls back to non-streaming mode for GPT-5 requests
 
 2. **ThemeContext** (`src/context/ThemeContext.tsx`)
    - Manages light/dark mode
@@ -43,15 +47,44 @@ The application uses React Context for state management with two main providers:
 ### OpenAI Integration Flow
 
 1. User sends message via ChatPanel
-2. ChatContext appends user message to chat history
-3. System prompt instructs AI to respond with:
+2. ChatContext creates placeholder assistant message and displays it immediately
+3. Makes streaming API call to OpenAI (non-streaming for GPT-5)
+4. **Streaming Mode** (GPT-4o, GPT-4o-mini, GPT-3.5-turbo):
+   - Response streams in real-time using Server-Sent Events (SSE)
+   - Each chunk updates the message content immediately
+   - User sees text appear character-by-character
+   - Provides instant feedback and perceived speed improvement
+5. **Non-Streaming Mode** (GPT-5):
+   - Waits for complete response
+   - Updates message once generation completes
+   - Required due to OpenAI organization verification requirement for GPT-5 streaming
+6. System prompt instructs AI to respond with:
    - A short 2-3 sentence summary
    - Complete extension code in JSON format within triple backticks
-4. Response parsing:
+7. Response parsing:
    - Summary text is extracted (everything before the JSON code block)
    - JSON is parsed to extract `manifest` and `files` objects
    - Files are displayed in FileList component with individual/ZIP download
-5. PreviewPanel renders the extension in an iframe sandbox
+8. **Automatic Chat Title**:
+   - After extension is generated, chat title is automatically set to the manifest name
+   - Example: If manifest.name is "Love Calculator", chat becomes "Love Calculator"
+   - ZIP download filename uses this title (sanitized to `love-calculator.zip`)
+   - Falls back to current chat title if manifest name is missing
+9. **Dynamic Preview Sizing**:
+   - PreviewPanel extracts actual dimensions from generated extension CSS/HTML
+   - Looks for width/height on `body`, `html`, `main`, or `.container` elements
+   - Automatically calculates total dimensions including padding
+   - Falls back to 400×600px (standard Chrome popup size) if no dimensions found
+   - Auto-height extensions default to 600px height to prevent scrollbars
+   - Each extension previews at its actual size, not stretched to fill the panel
+10. PreviewPanel renders the extension in an iframe sandbox
+
+**Streaming Implementation Details:**
+- Uses `ReadableStream` reader to process SSE chunks
+- Updates React state on every chunk for real-time UI refresh
+- 5-minute timeout for both streaming and non-streaming modes
+- Gracefully handles stream interruptions and errors
+- Final content saved to Chrome storage after completion
 
 ### Preview System
 
@@ -320,6 +353,11 @@ All data is stored in Chrome's local storage:
 The FileList component (`src/components/FileList.tsx`) uses JSZip to create downloadable archives:
 - Individual files: Direct blob download
 - ZIP: Bundles manifest.json + all generated files using JSZip library
+- **Automatic Naming**: ZIP filename is automatically generated from chat title
+  - Chat title is set from the extension's manifest.name field
+  - Filename is sanitized (removes invalid characters, converts spaces to hyphens, lowercase)
+  - Example: "Love Calculator" chat → `love-calculator.zip`
+  - Falls back to `chrome-extension.zip` if no title is available
 
 ### Required Manifest Permissions
 
@@ -378,8 +416,13 @@ OpenAI API calls have a 180-second (3 minute) timeout using AbortController. Thi
 
 ### Model-Specific Constraints
 
-- **GPT-5**: Only supports temperature = 1.0 (enforced in code)
-- **Other models**: Support full temperature range 0-1
+- **GPT-5**:
+  - Only supports temperature = 1.0 (enforced in code)
+  - Streaming disabled (requires organization verification on OpenAI platform)
+  - Uses non-streaming mode with "Generating extension..." loading indicator
+- **GPT-4o, GPT-4o-mini, GPT-3.5-turbo**:
+  - Support full temperature range 0-1
+  - Streaming enabled for real-time response
 - Default model: `gpt-4o`
 
 ## Component Hierarchy
@@ -403,21 +446,27 @@ App
 
 3. **Temperature Override**: When modifying API calls, remember GPT-5 temperature must always be 1.0 regardless of user settings.
 
-4. **Message Parsing**: The code extracts JSON from triple backtick code blocks. If the AI response format changes, update the regex in ChatContext and ChatPanel.
+4. **Streaming Constraints**: GPT-5 cannot use streaming mode due to OpenAI organization verification requirements. The code automatically disables streaming when GPT-5 is selected (line 152 in ChatContext.tsx). Other models use streaming for better UX.
 
-5. **Chrome Storage**: All persistence uses `chrome.storage.local`, not localStorage. Use the Chrome extension context for testing.
+5. **Message Parsing**: The code extracts JSON from triple backtick code blocks. If the AI response format changes, update the regex in ChatContext and ChatPanel.
 
-6. **Preview External References**: Generated extensions with `<link>` or `<script src="">` tags will fail in preview unless these are stripped. The preview system handles this automatically.
+6. **Chrome Storage**: All persistence uses `chrome.storage.local`, not localStorage. Use the Chrome extension context for testing.
 
-7. **Preview CSP**: The live preview uses a sandboxed page (`sandbox.html`) to bypass CSP restrictions. Do NOT modify the manifest CSP or remove the sandbox declaration - this is critical for preview interactivity.
+7. **Preview External References**: Generated extensions with `<link>` or `<script src="">` tags will fail in preview unless these are stripped. The preview system handles this automatically.
 
-8. **Chat Initialization**: The extension auto-creates a new chat on first open if no chats exist. This prevents empty state confusion.
+8. **Preview CSP**: The live preview uses a sandboxed page (`sandbox.html`) to bypass CSP restrictions. Do NOT modify the manifest CSP or remove the sandbox declaration - this is critical for preview interactivity.
 
-9. **Extension Persistence**: Extensions are stored per-chat, not globally. Switching chats loads that chat's extension into preview.
+9. **Chat Initialization**: The extension auto-creates a new chat on first open if no chats exist. This prevents empty state confusion.
 
-10. **Sandbox Communication**: PreviewPanel communicates with sandbox.html via postMessage. Always wait for `SANDBOX_READY` before sending HTML to prevent race conditions.
+10. **Extension Persistence**: Extensions are stored per-chat, not globally. Switching chats loads that chat's extension into preview.
 
-11. **Sandbox Event Listener Persistence**: The sandbox.html event listener MUST be in `<head>` and use `document.body.innerHTML` (NOT `document.write()`). Using `document.write()` destroys the listener and breaks chat switching.
+11. **Sandbox Communication**: PreviewPanel communicates with sandbox.html via postMessage. Always wait for `SANDBOX_READY` before sending HTML to prevent race conditions.
+
+12. **Sandbox Event Listener Persistence**: The sandbox.html event listener MUST be in `<head>` and use `document.body.innerHTML` (NOT `document.write()`). Using `document.write()` destroys the listener and breaks chat switching.
+
+13. **Chat Title from Manifest**: After an extension is generated, the chat title is automatically set to the extension's manifest.name field. This updates both the sidebar display and ZIP download filename with no extra API calls needed.
+
+14. **Dynamic Preview Dimensions**: The preview iframe automatically extracts and applies the actual dimensions from the generated extension's CSS. It parses width/height from body/html/main/container elements, calculates total size including padding, and displays each extension at its true size rather than a fixed dimension. Known limitation: Sizing may not perfectly match Chrome's rendering in all cases and requires further refinement.
 
 ## File Generation System
 
