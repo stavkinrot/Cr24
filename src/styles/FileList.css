@@ -1,19 +1,19 @@
 .file-list {
-  margin-top: var(--spacing-sm);
-  padding: var(--spacing-sm);
+  margin-top: var(--spacing-xs);
+  padding: var(--spacing-xs);
   background-color: var(--bg-secondary);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border-color);
 }
 
 .download-zip-button {
   width: 100%;
-  padding: 12px var(--spacing-sm);
-  margin-bottom: var(--spacing-sm);
+  padding: 8px var(--spacing-xs);
+  margin-bottom: var(--spacing-xs);
   background-color: var(--accent-color);
   color: white;
   border-radius: var(--radius-sm);
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 600;
   transition: all var(--transition-base);
   box-shadow: var(--shadow-2);
@@ -33,14 +33,14 @@
 .files {
   display: flex;
   flex-direction: column;
-  gap: var(--spacing-xs);
+  gap: 4px;
 }
 
 .file-item {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 10px 14px;
+  padding: 6px 10px;
   background-color: var(--bg-primary);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
@@ -60,7 +60,7 @@
 }
 
 .file-name {
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 500;
   color: var(--text-primary);
 }
@@ -70,6 +70,6 @@
 }
 
 .file-size {
-  font-size: 11px;
+  font-size: 10px;
   color: var(--text-tertiary);
 }

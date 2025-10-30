@@ -14,10 +14,10 @@
 .messages-container {
   flex: 1;
   overflow-y: auto;
-  padding: var(--spacing-md);
+  padding: var(--spacing-sm);
   display: flex;
   flex-direction: column;
-  gap: var(--spacing-md);
+  gap: var(--spacing-sm);
 }
 
 .empty-state {
@@ -60,7 +60,7 @@
 
 .message-content {
   max-width: 75%;
-  padding: 14px 18px;
+  padding: 10px 14px;
   border-radius: var(--radius-md);
   background-color: var(--bg-secondary);
   box-shadow: var(--shadow-1);
@@ -182,15 +182,15 @@
 
 .chat-input {
   flex: 1;
-  padding: 12px var(--spacing-sm);
+  padding: 10px var(--spacing-sm);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
   background-color: var(--bg-secondary);
   color: var(--text-primary);
   resize: none;
-  min-height: 48px;
-  max-height: 120px;
-  font-size: 15px;
+  min-height: 40px;
+  max-height: 100px;
+  font-size: 14px;
   line-height: 1.5;
   transition: all var(--transition-base);
 }
@@ -207,12 +207,12 @@
 }
 
 .send-button {
-  width: 48px;
-  height: 48px;
+  width: 40px;
+  height: 40px;
   border-radius: var(--radius-md);
   background-color: var(--text-secondary);
   color: white;
-  font-size: 20px;
+  font-size: 18px;
   display: flex;
   align-items: center;
   justify-content: center;

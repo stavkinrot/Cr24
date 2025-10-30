@@ -14,13 +14,13 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: var(--spacing-sm) var(--spacing-md);
+  padding: var(--spacing-xs) var(--spacing-sm);
   background-color: var(--bg-primary);
   border-bottom: 1px solid var(--border-color);
 }
 
 .preview-title {
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 600;
   letter-spacing: -0.015em;
   color: var(--text-primary);
@@ -56,7 +56,7 @@
 
 .preview-frame-container {
   flex: 1;
-  padding: var(--spacing-md);
+  padding: var(--spacing-sm);
   overflow: auto;
   background-color: var(--bg-secondary);
   display: flex;
@@ -99,18 +99,18 @@
 }
 
 .preview-footer {
-  padding: var(--spacing-md);
+  padding: var(--spacing-sm);
   border-top: 1px solid var(--border-color);
   background-color: var(--bg-primary);
 }
 
 .download-extension-button {
   width: 100%;
-  padding: 12px var(--spacing-sm);
+  padding: 10px var(--spacing-sm);
   background-color: var(--text-secondary);
   color: white;
   border-radius: var(--radius-sm);
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 600;
   transition: all var(--transition-base);
   box-shadow: var(--shadow-2);
