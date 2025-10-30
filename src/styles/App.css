@@ -9,6 +9,8 @@
 .app-content {
   flex: 1;
   display: flex;
+  gap: var(--spacing-md);
+  padding: var(--spacing-md);
   position: relative;
   overflow: hidden;
 }

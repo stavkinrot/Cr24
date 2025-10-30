@@ -1,20 +1,20 @@
 :root {
-  /* Backgrounds - Mercury metallic cool grays */
-  --bg-primary: #f5f5f7;
-  --bg-secondary: #e8e8ed;
-  --bg-tertiary: #d1d1d6;
+  /* Backgrounds - Warm off-white with beige undertones (logo-inspired) */
+  --bg-primary: #f8f7f4;
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #ececea;
 
-  /* Text - Cool dark grays and metallic mids */
-  --text-primary: #1d1d1f;
-  --text-secondary: #6e6e73;
-  --text-tertiary: #86868b;
+  /* Text - Warm dark grays with slight brown tint */
+  --text-primary: #2a2828;
+  --text-secondary: #7a7876;
+  --text-tertiary: #9a9895;
 
-  /* Borders - Subtle metallic gray */
-  --border-color: #d2d2d7;
+  /* Borders - Warm subtle gray */
+  --border-color: #dddbd8;
 
-  /* Accent - Neutral steel gray (no green/teal) */
-  --accent-color: #6e6e73;
-  --accent-hover: #1d1d1f;
+  /* Accent - Warm metallic gray (logo-inspired) */
+  --accent-color: #7a7876;
+  --accent-hover: #2a2828;
 
   /* Status colors - Apple system colors */
   --success-color: #34c759;
@@ -48,22 +48,22 @@
 }
 
 [data-theme="dark"] {
-  /* Backgrounds - Dark mercury metallic */
-  --bg-primary: #1c1c1e;
-  --bg-secondary: #2c2c2e;
-  --bg-tertiary: #3a3a3c;
+  /* Backgrounds - Warm dark tones */
+  --bg-primary: #1e1d1b;
+  --bg-secondary: #2a2928;
+  --bg-tertiary: #3c3a38;
 
-  /* Text - Cool light grays and metallic mids */
-  --text-primary: #f5f5f7;
-  --text-secondary: #98989d;
-  --text-tertiary: #636366;
+  /* Text - Warm light tones */
+  --text-primary: #f8f7f4;
+  --text-secondary: #a5a39f;
+  --text-tertiary: #7a7876;
 
-  /* Borders - Subtle dark metallic borders */
-  --border-color: #48484a;
+  /* Borders - Warm subtle dark borders */
+  --border-color: #4a4846;
 
-  /* Accent - Lighter steel gray for dark mode */
-  --accent-color: #98989d;
-  --accent-hover: #d1d1d6;
+  /* Accent - Warm lighter gray for dark mode */
+  --accent-color: #a5a39f;
+  --accent-hover: #dddbd8;
 
   /* Status colors - Adjusted for dark mode */
   --success-color: #30d158;
