@@ -12,9 +12,9 @@
   /* Borders - Softer, less harsh */
   --border-color: #d2d2d7;
 
-  /* Accent - Apple blue, less saturated */
-  --accent-color: #007aff;
-  --accent-hover: #0051d5;
+  /* Accent - ChatGPT-style neutral teal */
+  --accent-color: #10a37f;
+  --accent-hover: #0d8c6d;
 
   /* Status colors - Apple system colors */
   --success-color: #34c759;
@@ -61,9 +61,9 @@
   /* Borders - Subtle dark borders */
   --border-color: #38383a;
 
-  /* Accent - Brighter blue for dark mode */
-  --accent-color: #0a84ff;
-  --accent-hover: #409cff;
+  /* Accent - Brighter teal for dark mode */
+  --accent-color: #19c37d;
+  --accent-hover: #2dd894;
 
   /* Status colors - Adjusted for dark mode */
   --success-color: #30d158;

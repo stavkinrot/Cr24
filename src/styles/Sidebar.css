@@ -150,7 +150,6 @@
 }
 
 .delete-button:hover {
-  background-color: var(--danger-color);
-  color: white;
-  transform: scale(1.05);
+  background-color: var(--bg-tertiary);
+  color: var(--text-primary);
 }
