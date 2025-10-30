@@ -13,6 +13,9 @@
     // Set up message listener BEFORE document is ready
     // This ensures it persists even after document.write()
     (function() {
+      // Demo page iframe reference (for chrome.scripting mock)
+      let demoPageFrame = null;
+
       // Listen for messages from the parent
       window.addEventListener('message', function(event) {
         // Verify origin for security
@@ -20,6 +23,14 @@
 
         if (event.data.type === 'RENDER_HTML') {
           console.log('Sandbox received RENDER_HTML message');
+
+          // Clear any existing demo page
+          const existingDemo = document.getElementById('demo-page-container');
+          if (existingDemo) {
+            existingDemo.remove();
+            demoPageFrame = null;
+          }
+
           // Clear the body and inject new HTML
           document.body.innerHTML = event.data.html;
 

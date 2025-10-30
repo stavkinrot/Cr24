@@ -115,6 +115,68 @@ html.replace(/<meta[^>]*http-equiv=["']Content-Security-Policy["'][^>]*>/gi, '')
 - Supports both popup and content script extensions automatically
 - Preview is fully interactive - buttons, forms, and event listeners work without CSP violations
 
+### Chrome API Bridge Architecture
+
+**Critical Issue:** Sandboxed iframes CANNOT access the parent extension's Chrome APIs directly. Even with `allow-same-origin`, the sandbox context is isolated and `chrome.tabs`, `chrome.scripting`, etc. are undefined.
+
+**Solution: postMessage Bridge**
+
+The preview uses a postMessage bridge to allow sandboxed popup code to call real Chrome APIs:
+
+1. **Sandbox Chrome API Mock** (injected into preview HTML):
+   - Provides `chrome.tabs`, `chrome.scripting`, `chrome.storage` objects
+   - When called, sends `CHROME_API_CALL` postMessage to parent
+   - Waits for `CHROME_API_RESULT` response
+   - Returns result to extension code
+
+2. **Parent Message Handler** (in PreviewPanel.tsx):
+   - Listens for `CHROME_API_CALL` messages
+   - Executes real Chrome API in parent context (has access)
+   - Sends result back via `CHROME_API_RESULT` postMessage
+
+**Supported APIs via Bridge:**
+- `chrome.tabs.query()` - Gets active tab for script injection
+- `chrome.tabs.sendMessage()` - Sends messages to content scripts
+- `chrome.scripting.executeScript()` - Injects scripts into active tab
+- `chrome.storage.local.get/set()` - Mock storage operations
+
+**Content Script Injection:**
+When a generated extension has content scripts (detected by `content.js` file or `content_scripts` in manifest):
+- PreviewPanel automatically injects the content script into the active tab when preview loads
+- Uses real `chrome.scripting.executeScript()` from parent context
+- Content script runs on the REAL active webpage
+- Popup can then communicate with it via `chrome.tabs.sendMessage()`
+
+**Key Insight:**
+- **Preview shows UI only** (visualization in sandboxed iframe)
+- **Functionality executes on real pages** (via bridge to parent's Chrome APIs)
+- Extensions that use `chrome.scripting.executeScript()` inject into real active tab
+- Extensions with content scripts have them auto-injected into real active tab
+
+### Lessons Learned: Chrome API Access Attempts
+
+**Attempt 1: Direct Chrome API in Sandbox**
+- Tried to access `window.chrome` directly in sandbox
+- **Failed**: Sandboxed iframes have isolated context, no Chrome API access
+
+**Attempt 2: Spread Operator to Preserve Real APIs**
+- Used `{ ...realChrome, storage: mock, ... }`
+- **Failed**: Still replaced entire object, lost real APIs
+
+**Attempt 3: Conditional Addition**
+- Only added mocks if `!window.chrome.storage`
+- **Failed**: Sandbox has no `window.chrome` at all
+
+**Attempt 4: Demo Page in Separate Iframe**
+- Created nested iframe for demo page to run scripts
+- **Failed**: Complex, caused CSP violations, "blocked by Chrome"
+
+**Final Solution: postMessage Bridge**
+- Sandbox sends API requests to parent via postMessage
+- Parent executes real Chrome APIs
+- Results sent back to sandbox
+- **Works**: Clean separation, no CSP issues, real APIs accessible
+
 ### Data Persistence
 
 All data is stored in Chrome's local storage:
@@ -130,6 +192,23 @@ All data is stored in Chrome's local storage:
 The FileList component (`src/components/FileList.tsx`) uses JSZip to create downloadable archives:
 - Individual files: Direct blob download
 - ZIP: Bundles manifest.json + all generated files using JSZip library
+
+### Required Manifest Permissions
+
+For the Chrome API bridge to work, the CRX Generator extension itself needs these permissions in `manifest.json`:
+
+```json
+"permissions": [
+  "storage",      // For settings and chat storage
+  "activeTab",    // Required to access current tab for script injection
+  "scripting"     // Required to inject content scripts and execute scripts
+]
+```
+
+**Why These Are Needed:**
+- `activeTab`: Allows getting tab info and sending messages to content scripts
+- `scripting`: Allows `chrome.scripting.executeScript()` to inject generated extension code
+- Without these, the preview cannot execute functionality on real webpages
 
 ## Key Technical Details
 
