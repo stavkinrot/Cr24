@@ -1,9 +1,10 @@
 import React, { useEffect, useRef } from 'react';
+import JSZip from 'jszip';
 import { useChat } from '../context/ChatContext';
 import '../styles/PreviewPanel.css';
 
 const PreviewPanel: React.FC = () => {
-  const { generatedExtension } = useChat();
+  const { generatedExtension, currentChat } = useChat();
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const generatedExtensionRef = useRef(generatedExtension);
   const [iframeDimensions, setIframeDimensions] = React.useState({ width: '400px', height: '600px' });
@@ -801,6 +802,42 @@ if (document.readyState === 'loading') {
     }
   };
 
+  const downloadExtension = async () => {
+    if (!generatedExtension) return;
+
+    const zip = new JSZip();
+
+    // Add manifest.json
+    zip.file('manifest.json', JSON.stringify(generatedExtension.manifest, null, 2));
+
+    // Add all other files
+    Object.entries(generatedExtension.files).forEach(([filename, content]) => {
+      zip.file(filename, content);
+    });
+
+    // Generate a filename from chat title or use default
+    const sanitizeFilename = (name: string) => {
+      return name
+        .replace(/[<>:"/\\|?*]/g, '')
+        .replace(/\s+/g, '-')
+        .substring(0, 50)
+        .toLowerCase();
+    };
+
+    const zipFilename = currentChat?.title
+      ? `${sanitizeFilename(currentChat.title)}.zip`
+      : 'chrome-extension.zip';
+
+    // Generate and download zip
+    const blob = await zip.generateAsync({ type: 'blob' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = zipFilename;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const handleRefresh = () => {
     renderPreview();
   };
@@ -831,6 +868,11 @@ if (document.readyState === 'loading') {
                   maxHeight: '100%'
                 }}
               />
+            </div>
+            <div className="preview-footer">
+              <button className="download-extension-button" onClick={downloadExtension}>
+                Download Extension
+              </button>
             </div>
           </>
         ) : (

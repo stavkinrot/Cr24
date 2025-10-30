@@ -1,20 +1,20 @@
 :root {
-  /* Backgrounds - Soft off-white, not pure white */
-  --bg-primary: #fafafa;
-  --bg-secondary: #f7f7f7;
-  --bg-tertiary: #efefef;
+  /* Backgrounds - Mercury metallic cool grays */
+  --bg-primary: #f5f5f7;
+  --bg-secondary: #e8e8ed;
+  --bg-tertiary: #d1d1d6;
 
-  /* Text - Apple's near-black and grays */
+  /* Text - Cool dark grays and metallic mids */
   --text-primary: #1d1d1f;
-  --text-secondary: #86868b;
-  --text-tertiary: #a1a1a6;
+  --text-secondary: #6e6e73;
+  --text-tertiary: #86868b;
 
-  /* Borders - Softer, less harsh */
+  /* Borders - Subtle metallic gray */
   --border-color: #d2d2d7;
 
-  /* Accent - ChatGPT-style neutral teal */
-  --accent-color: #10a37f;
-  --accent-hover: #0d8c6d;
+  /* Accent - Neutral steel gray (no green/teal) */
+  --accent-color: #6e6e73;
+  --accent-hover: #1d1d1f;
 
   /* Status colors - Apple system colors */
   --success-color: #34c759;
@@ -48,22 +48,22 @@
 }
 
 [data-theme="dark"] {
-  /* Backgrounds - True black for OLED */
-  --bg-primary: #000000;
-  --bg-secondary: #1c1c1e;
-  --bg-tertiary: #2c2c2e;
+  /* Backgrounds - Dark mercury metallic */
+  --bg-primary: #1c1c1e;
+  --bg-secondary: #2c2c2e;
+  --bg-tertiary: #3a3a3c;
 
-  /* Text - White and softer grays */
-  --text-primary: #ffffff;
+  /* Text - Cool light grays and metallic mids */
+  --text-primary: #f5f5f7;
   --text-secondary: #98989d;
   --text-tertiary: #636366;
 
-  /* Borders - Subtle dark borders */
-  --border-color: #38383a;
+  /* Borders - Subtle dark metallic borders */
+  --border-color: #48484a;
 
-  /* Accent - Brighter teal for dark mode */
-  --accent-color: #19c37d;
-  --accent-hover: #2dd894;
+  /* Accent - Lighter steel gray for dark mode */
+  --accent-color: #98989d;
+  --accent-hover: #d1d1d6;
 
   /* Status colors - Adjusted for dark mode */
   --success-color: #30d158;

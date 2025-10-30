@@ -4,8 +4,8 @@
   flex-direction: column;
   background-color: var(--bg-primary);
   border-right: 1px solid var(--border-color);
-  max-width: 50%;
-  min-width: 400px;
+  max-width: 45%;
+  min-width: 350px;
 }
 
 .messages-container {
@@ -171,8 +171,8 @@
 
 .input-container {
   display: flex;
-  gap: var(--spacing-sm);
-  padding: var(--spacing-md);
+  gap: var(--spacing-xs);
+  padding: var(--spacing-sm);
   background-color: var(--bg-primary);
   border-top: 1px solid var(--border-color);
 }
@@ -207,7 +207,7 @@
   width: 48px;
   height: 48px;
   border-radius: var(--radius-md);
-  background-color: var(--accent-color);
+  background-color: var(--text-secondary);
   color: white;
   font-size: 20px;
   display: flex;
@@ -218,7 +218,7 @@
 }
 
 .send-button:hover:not(:disabled) {
-  background-color: var(--accent-hover);
+  background-color: var(--text-primary);
   transform: translateY(-1px);
   box-shadow: var(--shadow-3);
 }
