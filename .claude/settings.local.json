@@ -7,7 +7,11 @@
       "Bash(git add:*)",
       "Bash(git commit -m \"$(cat <<''EOF''\nInitial implementation of CRX Generator Chrome extension\n\nBuilt a complete AI-powered Chrome extension generator with the following features:\n\n- React + TypeScript + Vite setup with Chrome extension Manifest v3\n- OpenAI API integration for generating Chrome extensions from natural language\n- Chat interface with message history and persistence via Chrome storage\n- Live preview system with iframe simulation for popup and content script extensions\n- File download system with individual file downloads and ZIP export using JSZip\n- Settings panel with API key management, model selection (GPT-5, GPT-4o, GPT-4o-mini, etc.), and temperature control\n- Dark/light theme toggle with persistence\n- Sidebar for managing multiple chat sessions\n- Custom Vite build plugin to copy manifest.json and icons to dist folder\n- Fixed popup dimensions (800x600) for Chrome extension compatibility\n- Error handling with 3-minute API timeout\n- GPT-5 temperature constraint (automatically uses 1.0)\n- Message parsing to extract summary text and hide code blocks in chat\n- FileList component displaying generated files with sizes\n- Comprehensive documentation (README, SETUP, CONTRIBUTING, EXAMPLES, CLAUDE.md)\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")",
       "Bash(git commit:*)",
-      "Read(//e/User/UserFiles/new-lovecalc/**)"
+      "Read(//e/User/UserFiles/new-lovecalc/**)",
+      "Read(//e/User/UserFiles/lovecalcnew/**)",
+      "Read(//e/User/UserFiles/word replacer/**)",
+      "Read(//e/User/UserFiles/word-replacer-2/**)",
+      "Read(//e/User/UserFiles/word-replacer-3/**)"
     ],
     "deny": [],
     "ask": []

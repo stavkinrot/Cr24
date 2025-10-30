@@ -119,41 +119,106 @@ html.replace(/<meta[^>]*http-equiv=["']Content-Security-Policy["'][^>]*>/gi, '')
 
 **Critical Issue:** Sandboxed iframes CANNOT access the parent extension's Chrome APIs directly. Even with `allow-same-origin`, the sandbox context is isolated and `chrome.tabs`, `chrome.scripting`, etc. are undefined.
 
-**Solution: postMessage Bridge**
+**Solution: Multi-Layer postMessage Bridge System**
 
-The preview uses a postMessage bridge to allow sandboxed popup code to call real Chrome APIs:
+The preview uses a sophisticated multi-layer bridge system to enable full Chrome API functionality:
 
-1. **Sandbox Chrome API Mock** (injected into preview HTML):
+#### Layer 1: Sandbox-to-Parent Bridge (Popup Preview)
+
+1. **Sandbox Chrome API Mock** (injected into preview HTML, lines 386-489 in PreviewPanel.tsx):
    - Provides `chrome.tabs`, `chrome.scripting`, `chrome.storage` objects
    - When called, sends `CHROME_API_CALL` postMessage to parent
    - Waits for `CHROME_API_RESULT` response
    - Returns result to extension code
+   - **Critical**: Supports both Promise-based AND callback-based APIs (e.g., `executeScript(details, callback)`)
 
-2. **Parent Message Handler** (in PreviewPanel.tsx):
-   - Listens for `CHROME_API_CALL` messages
-   - Executes real Chrome API in parent context (has access)
+2. **Parent Message Handler** (in PreviewPanel.tsx, lines 10-217):
+   - Listens for `CHROME_API_CALL` messages from sandbox
+   - Executes real Chrome API in parent context (has full access)
    - Sends result back via `CHROME_API_RESULT` postMessage
+
+#### Layer 2: Content Script Communication Bridge
+
+**Problem:** Content scripts injected into real webpages cannot directly receive messages from the sandboxed popup because:
+1. Content scripts run in the MAIN world on real pages
+2. They need `chrome.runtime.onMessage` to receive messages
+3. Real pages don't have Chrome APIs
+
+**Solution: postMessage-Based Content Script Bridge**
+
+**Content Script Injection with Chrome API Mock** (lines 115-188 in PreviewPanel.tsx):
+- When injecting content scripts (either on popup load or via `executeScript({ files: [...] }}`):
+  1. Wraps the content script code with a Chrome API mock
+  2. Sets up `chrome.runtime.onMessage.addListener()` that listens to `window.postMessage`
+  3. Filters messages with `source: 'crx-generator-popup'`
+  4. Calls registered listeners and sends responses back via `window.postMessage`
+  5. Injects via script element (not eval) to avoid CSP restrictions
+  6. Uses `world: 'MAIN'` to execute in page context
+
+**Message Sending from Popup to Content Script** (lines 23-97 in PreviewPanel.tsx):
+- When popup calls `chrome.tabs.sendMessage(tabId, message)`:
+  1. Bridge intercepts the call
+  2. Uses `chrome.scripting.executeScript` to inject a message-sending script into the active tab
+  3. That script sends `window.postMessage({ source: 'crx-generator-popup', message })` in MAIN world
+  4. Content script receives the postMessage event
+  5. Executes the message listener callback
+  6. Sends response back via `window.postMessage({ source: 'crx-generator-content', response })`
+  7. Message-sending script receives the response and returns it to the popup
+
+**Critical Implementation Details:**
+
+1. **File-Based Injection Transformation** (lines 103-188):
+   - When `chrome.scripting.executeScript({ files: ['content.js'] })` is called
+   - Bridge looks up file content from `generatedExtension.files['content.js']`
+   - Wraps with Chrome API mock
+   - Injects via script element to avoid CSP eval() restriction
+   - Uses `world: 'MAIN'` to ensure same context as page
+
+2. **CSP Bypass for Content Scripts** (line 179):
+   - Cannot use `eval()` due to Chrome's CSP restrictions
+   - Instead: Creates `<script>` element, sets `textContent`, appends to page, then removes
+   - Browser executes script content without CSP violations
+
+3. **Execution World Context** (critical for communication):
+   - Content scripts: `world: 'MAIN'` (page context)
+   - Message sending scripts: `world: 'MAIN'` (line 49)
+   - Both must be in MAIN world to communicate via `window.postMessage`
+
+4. **Callback Support** (lines 477-488):
+   - Chrome APIs support both Promises AND callbacks
+   - Mock must handle: `executeScript(details, callback)`
+   - Calls callback after Promise resolves
+   - Sets `chrome.runtime.lastError` on errors
 
 **Supported APIs via Bridge:**
 - `chrome.tabs.query()` - Gets active tab for script injection
-- `chrome.tabs.sendMessage()` - Sends messages to content scripts
-- `chrome.scripting.executeScript()` - Injects scripts into active tab
+- `chrome.tabs.sendMessage()` - Sends messages to content scripts (via postMessage bridge)
+- `chrome.scripting.executeScript()` - Injects scripts into active tab (transforms file references to code)
 - `chrome.storage.local.get/set()` - Mock storage operations
 
-**Content Script Injection:**
-When a generated extension has content scripts (detected by `content.js` file or `content_scripts` in manifest):
-- PreviewPanel automatically injects the content script into the active tab when preview loads
-- Uses real `chrome.scripting.executeScript()` from parent context
-- Content script runs on the REAL active webpage
-- Popup can then communicate with it via `chrome.tabs.sendMessage()`
+**Content Script Injection Flow:**
+1. When popup opens with content script extension:
+   - `injectContentScripts()` (line 230) automatically injects content.js
+   - Wraps with Chrome API mock
+   - Registers message listeners
+2. When popup calls `executeScript({ files: ['content.js'] })`:
+   - Re-injects content script (popup may do this to ensure it's loaded)
+   - Uses same wrapping mechanism
+3. When popup calls `tabs.sendMessage()`:
+   - Injects message-sending script via executeScript
+   - Sends postMessage to content script
+   - Waits for response
+   - Returns response to popup
 
 **Key Insight:**
-- **Preview shows UI only** (visualization in sandboxed iframe)
-- **Functionality executes on real pages** (via bridge to parent's Chrome APIs)
-- Extensions that use `chrome.scripting.executeScript()` inject into real active tab
-- Extensions with content scripts have them auto-injected into real active tab
+- **Preview popup runs in sandboxed iframe** (isolated, uses postMessage to parent)
+- **Content scripts run on real webpages in MAIN world** (can modify page DOM)
+- **Communication uses window.postMessage** (only way to communicate between contexts)
+- **All Chrome APIs are bridged** (either to parent extension or via postMessage)
 
-### Lessons Learned: Chrome API Access Attempts
+### Lessons Learned: Chrome API Access and Content Script Communication
+
+**Early Attempts (Sandbox Access):**
 
 **Attempt 1: Direct Chrome API in Sandbox**
 - Tried to access `window.chrome` directly in sandbox
@@ -171,11 +236,48 @@ When a generated extension has content scripts (detected by `content.js` file or
 - Created nested iframe for demo page to run scripts
 - **Failed**: Complex, caused CSP violations, "blocked by Chrome"
 
-**Final Solution: postMessage Bridge**
+**Solution for Sandbox: postMessage Bridge to Parent**
 - Sandbox sends API requests to parent via postMessage
 - Parent executes real Chrome APIs
 - Results sent back to sandbox
 - **Works**: Clean separation, no CSP issues, real APIs accessible
+
+**Content Script Communication Issues:**
+
+**Issue 1: CSP Blocks eval() in Content Scripts**
+- Tried using `eval(contentScriptCode)` in executeScript func
+- **Failed**: Chrome CSP blocks `eval()` with error: "Refused to evaluate a string as JavaScript because 'unsafe-eval' is not an allowed"
+- **Solution**: Inject code via `<script>` element: `script.textContent = code; document.head.appendChild(script);`
+
+**Issue 2: Isolated World vs MAIN World**
+- Content scripts injected without `world: 'MAIN'` run in isolated world
+- Message-sending scripts also ran in isolated world by default
+- **Failed**: Different worlds cannot communicate via `window.postMessage`
+- **Solution**: Always use `world: 'MAIN'` for both content scripts and message-sending scripts (line 49, 185, 319)
+
+**Issue 3: Missing Callback Support**
+- Chrome API mock only handled Promise-based `executeScript(details)`
+- Generated extensions used callback style: `executeScript(details, callback)`
+- **Failed**: Callback never called, Promise never resolved, flow blocked
+- **Solution**: Add callback parameter to mock: `executeScript: async function(injection, callback)` and call it after Promise resolves (line 477)
+
+**Issue 4: File References Don't Exist**
+- Popup calls `executeScript({ files: ['content.js'] })`
+- **Failed**: Chrome API error "Could not load file: 'content.js'" because file doesn't exist in CRX Generator extension
+- **Solution**: Intercept file-based injections, look up code from `generatedExtension.files`, transform to inline code execution
+
+**Issue 5: Content Scripts Can't Receive Messages**
+- Content scripts run on real pages without Chrome APIs
+- No `chrome.runtime.onMessage` available
+- **Failed**: `tabs.sendMessage()` couldn't reach content script
+- **Solution**: Wrap content scripts with Chrome API mock that listens to `window.postMessage`, and bridge `tabs.sendMessage()` to inject message-sending scripts that use `window.postMessage`
+
+**Final Working Architecture:**
+- Sandbox popup → postMessage → Parent extension (for Chrome APIs)
+- Parent extension → executeScript (MAIN world) → Real webpage
+- Content scripts wrapped with mock → listen to window.postMessage
+- Popup sendMessage → executeScript injects messenger → window.postMessage → Content script
+- Full bidirectional communication working with real DOM manipulation
 
 ### Data Persistence
 

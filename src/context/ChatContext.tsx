@@ -136,7 +136,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       console.log('API Key starts with:', settings.apiKey.substring(0, 10) + '...');
 
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 180000); // 3 minute timeout
+      const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minute timeout
 
       // GPT-5 only supports temperature of 1
       const effectiveTemperature = settings.model === 'gpt-5' ? 1 : settings.temperature;

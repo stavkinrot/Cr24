@@ -5,6 +5,7 @@ import '../styles/PreviewPanel.css';
 const PreviewPanel: React.FC = () => {
   const { generatedExtension } = useChat();
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const generatedExtensionRef = useRef(generatedExtension);
 
   // Listen for Chrome API requests from sandbox
   useEffect(() => {
@@ -20,17 +21,175 @@ const PreviewPanel: React.FC = () => {
           if (api === 'tabs' && method === 'query') {
             result = await chrome.tabs.query(args[0]);
           } else if (api === 'tabs' && method === 'sendMessage') {
-            result = await new Promise((resolve, reject) => {
-              chrome.tabs.sendMessage(args[0], args[1], (response) => {
-                if (chrome.runtime.lastError) {
-                  reject(chrome.runtime.lastError);
-                } else {
-                  resolve(response);
+            // Send message to content script via postMessage and executeScript
+            const message = args[1];
+            console.log('tabs.sendMessage called with:', args);
+
+            result = await new Promise(async (resolve, reject) => {
+              const messageId = 'msg_' + Date.now() + '_' + Math.random();
+
+              // Timeout after 5 seconds
+              const timeout = setTimeout(() => {
+                reject(new Error('Message timeout: Content script did not respond'));
+              }, 5000);
+
+              // Get the tab to send message to
+              try {
+                const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+                if (!tab || !tab.id) {
+                  clearTimeout(timeout);
+                  reject(new Error('No active tab found'));
+                  return;
                 }
-              });
+
+                console.log('Sending message to content script via executeScript, tab:', tab.id, 'message:', message);
+
+                // Execute script that sends postMessage to content script and waits for response
+                const results = await chrome.scripting.executeScript({
+                  target: { tabId: tab.id },
+                  world: 'MAIN', // CRITICAL: Must be MAIN world to communicate with content script
+                  func: (msg: any, msgId: string) => {
+                    return new Promise((resolve) => {
+                      console.log('[Page] Sending postMessage to content script:', msg);
+
+                      // Set up listener for response
+                      const responseHandler = (event: MessageEvent) => {
+                        if (event.data && event.data.source === 'crx-generator-content' && event.data.messageId === msgId) {
+                          window.removeEventListener('message', responseHandler);
+                          console.log('[Page] Received response from content script:', event.data.response);
+                          resolve(event.data.response);
+                        }
+                      };
+
+                      window.addEventListener('message', responseHandler);
+
+                      // Send message to content script
+                      window.postMessage({
+                        source: 'crx-generator-popup',
+                        messageId: msgId,
+                        message: msg
+                      }, '*');
+
+                      // Timeout
+                      setTimeout(() => {
+                        window.removeEventListener('message', responseHandler);
+                        resolve(null);
+                      }, 4000);
+                    });
+                  },
+                  args: [message, messageId]
+                });
+
+                console.log('executeScript results:', results);
+
+                clearTimeout(timeout);
+
+                // Extract result from executeScript response
+                if (results && results[0] && results[0].result !== undefined) {
+                  resolve(results[0].result);
+                } else {
+                  reject(new Error('No response from content script'));
+                }
+              } catch (err) {
+                clearTimeout(timeout);
+                reject(err);
+              }
             });
           } else if (api === 'scripting' && method === 'executeScript') {
-            result = await chrome.scripting.executeScript(args[0]);
+            const injectionDetails = args[0];
+            console.log('scripting.executeScript called with:', injectionDetails);
+
+            // Check if using file-based injection
+            if (injectionDetails.files && Array.isArray(injectionDetails.files)) {
+              console.log('File-based injection detected, files:', injectionDetails.files);
+              // Transform files into inline code execution
+              const fileContents: string[] = [];
+
+              for (const fileName of injectionDetails.files) {
+                const content = generatedExtensionRef.current?.files[fileName];
+                if (!content) {
+                  throw new Error(`Could not find generated file: '${fileName}'`);
+                }
+                fileContents.push(content);
+              }
+
+              const combinedCode = fileContents.join('\n\n');
+
+              // Wrap content script with Chrome API mock for message receiving
+              const wrappedCode = `
+(function() {
+  // Set up chrome.runtime.onMessage for content scripts
+  if (!window.chrome) {
+    window.chrome = {};
+  }
+  if (!window.chrome.runtime) {
+    window.chrome.runtime = {};
+  }
+
+  // Create message listener system
+  const messageListeners = [];
+
+  window.chrome.runtime.onMessage = {
+    addListener: function(callback) {
+      messageListeners.push(callback);
+      console.log('[Content Script] Message listener registered, total:', messageListeners.length);
+    }
+  };
+
+  // Listen for messages from the extension
+  window.addEventListener('message', function(event) {
+    // Only accept messages from same origin with our marker
+    if (event.source !== window || !event.data || event.data.source !== 'crx-generator-popup') {
+      return;
+    }
+
+    console.log('[Content Script] Received message:', event.data);
+    const message = event.data.message;
+
+    // Call all registered listeners
+    messageListeners.forEach(listener => {
+      try {
+        listener(message, {}, function(response) {
+          // Send response back
+          console.log('[Content Script] Sending response:', response);
+          window.postMessage({
+            source: 'crx-generator-content',
+            messageId: event.data.messageId,
+            response: response
+          }, '*');
+        });
+      } catch (err) {
+        console.error('[Content Script] Error in message listener:', err);
+      }
+    });
+  });
+
+  console.log('[Content Script] Chrome API mock initialized');
+
+  // Execute the actual content script
+  ${combinedCode}
+})();
+              `;
+
+              // Execute using func instead of files
+              // We can't use eval due to CSP, so we inject the code via script element
+              result = await chrome.scripting.executeScript({
+                target: injectionDetails.target,
+                func: (code: string) => {
+                  const script = document.createElement('script');
+                  script.textContent = code;
+                  (document.head || document.documentElement).appendChild(script);
+                  script.remove();
+                },
+                args: [wrappedCode],
+                world: injectionDetails.world || 'MAIN',
+                injectImmediately: injectionDetails.injectImmediately
+              });
+              console.log('File-based executeScript completed, result:', result);
+            } else {
+              // Pass through func-based injections unchanged
+              result = await chrome.scripting.executeScript(injectionDetails);
+            }
           } else if (api === 'storage.local' && method === 'get') {
             result = await new Promise(resolve => {
               chrome.storage.local.get(args[0], resolve);
@@ -69,6 +228,7 @@ const PreviewPanel: React.FC = () => {
 
   useEffect(() => {
     console.log('PreviewPanel: generatedExtension changed', generatedExtension);
+    generatedExtensionRef.current = generatedExtension;
     if (generatedExtension && iframeRef.current) {
       // Inject content scripts into active tab if they exist
       injectContentScripts();
@@ -99,19 +259,75 @@ const PreviewPanel: React.FC = () => {
 
       console.log('Injecting content script into active tab:', tab.id);
 
-      // Inject the content script
+      // Wrap content script with Chrome API mock (same as in executeScript handler)
+      const wrappedCode = `
+(function() {
+  // Set up chrome.runtime.onMessage for content scripts
+  if (!window.chrome) {
+    window.chrome = {};
+  }
+  if (!window.chrome.runtime) {
+    window.chrome.runtime = {};
+  }
+
+  // Create message listener system
+  const messageListeners = [];
+
+  window.chrome.runtime.onMessage = {
+    addListener: function(callback) {
+      messageListeners.push(callback);
+      console.log('[Content Script] Message listener registered, total:', messageListeners.length);
+    }
+  };
+
+  // Listen for messages from the extension
+  window.addEventListener('message', function(event) {
+    // Only accept messages from same origin with our marker
+    if (event.source !== window || !event.data || event.data.source !== 'crx-generator-popup') {
+      return;
+    }
+
+    console.log('[Content Script] Received message:', event.data);
+    const message = event.data.message;
+
+    // Call all registered listeners
+    messageListeners.forEach(listener => {
+      try {
+        listener(message, {}, function(response) {
+          // Send response back
+          console.log('[Content Script] Sending response:', response);
+          window.postMessage({
+            source: 'crx-generator-content',
+            messageId: event.data.messageId,
+            response: response
+          }, '*');
+        });
+      } catch (err) {
+        console.error('[Content Script] Error in message listener:', err);
+      }
+    });
+  });
+
+  console.log('[Content Script] Chrome API mock initialized');
+
+  // Execute the actual content script
+  ${contentScriptFile}
+})();
+      `;
+
+      // Inject the content script using script element (avoid CSP eval restriction)
       await chrome.scripting.executeScript({
         target: { tabId: tab.id, allFrames: manifest?.content_scripts?.[0]?.all_frames || false },
-        func: (scriptCode) => {
-          // Execute the content script code in the page context
-          try {
-            eval(scriptCode);
-            console.log('Content script injected successfully');
-          } catch (error) {
-            console.error('Error executing content script:', error);
-          }
+        func: (scriptCode: string) => {
+          // Inject via script element to avoid CSP eval restriction
+          const script = document.createElement('script');
+          script.textContent = scriptCode;
+          (document.head || document.documentElement).appendChild(script);
+          script.remove();
+          console.log('Content script injected successfully');
         },
-        args: [contentScriptFile]
+        args: [wrappedCode],
+        world: 'MAIN'
       });
 
       console.log('Content script injected successfully');
@@ -258,11 +474,15 @@ ${html}
               }
             },
             scripting: {
-              executeScript: async function(injection) {
+              executeScript: async function(injection, callback) {
                 try {
-                  return await callParentChromeAPI('scripting', 'executeScript', [injection]);
+                  const result = await callParentChromeAPI('scripting', 'executeScript', [injection]);
+                  if (callback) callback(result);
+                  return result;
                 } catch (err) {
                   console.error('scripting.executeScript error:', err);
+                  window.chrome.runtime.lastError = err;
+                  if (callback) callback();
                   throw err;
                 }
               }
