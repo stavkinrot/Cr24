@@ -1,30 +1,30 @@
 :root {
-  /* Backgrounds - Warm off-white with beige undertones (logo-inspired) */
-  --bg-primary: #f8f7f4;
+  /* Backgrounds - Cool metallic mercury with subtle blue undertones */
+  --bg-primary: #f4f5f7;
   --bg-secondary: #ffffff;
-  --bg-tertiary: #ececea;
+  --bg-tertiary: #e8eaed;
 
-  /* Text - Warm dark grays with slight brown tint */
-  --text-primary: #2a2828;
-  --text-secondary: #7a7876;
-  --text-tertiary: #9a9895;
+  /* Text - Cool metallic grays inspired by polished metal */
+  --text-primary: #1f2225;
+  --text-secondary: #71757e;
+  --text-tertiary: #9ca0a8;
 
-  /* Borders - Warm subtle gray */
-  --border-color: #dddbd8;
+  /* Borders - Subtle metallic silver */
+  --border-color: #d8dade;
 
-  /* Accent - Warm metallic gray (logo-inspired) */
-  --accent-color: #7a7876;
-  --accent-hover: #2a2828;
+  /* Accent - Metallic steel blue-gray */
+  --accent-color: #7b8088;
+  --accent-hover: #5a5f68;
 
   /* Status colors - Apple system colors */
   --success-color: #34c759;
   --danger-color: #ff3b30;
 
-  /* Shadow elevation system */
-  --shadow-1: 0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.06);
-  --shadow-2: 0 4px 6px rgba(0,0,0,0.04), 0 2px 4px rgba(0,0,0,0.06);
-  --shadow-3: 0 10px 15px rgba(0,0,0,0.05), 0 4px 6px rgba(0,0,0,0.07);
-  --shadow-4: 0 20px 25px rgba(0,0,0,0.06), 0 10px 10px rgba(0,0,0,0.08);
+  /* Shadow elevation system - metallic subtle shadows */
+  --shadow-1: 0 1px 3px rgba(31,34,37,0.06), 0 1px 2px rgba(31,34,37,0.08);
+  --shadow-2: 0 4px 6px rgba(31,34,37,0.06), 0 2px 4px rgba(31,34,37,0.08), inset 0 -1px 0 rgba(255,255,255,0.1);
+  --shadow-3: 0 10px 15px rgba(31,34,37,0.07), 0 4px 6px rgba(31,34,37,0.09);
+  --shadow-4: 0 20px 25px rgba(31,34,37,0.08), 0 10px 10px rgba(31,34,37,0.10);
 
   /* Legacy shadow variable for compatibility */
   --shadow: rgba(0, 0, 0, 0.08);
@@ -48,22 +48,22 @@
 }
 
 [data-theme="dark"] {
-  /* Backgrounds - Warm dark tones */
-  --bg-primary: #1e1d1b;
-  --bg-secondary: #2a2928;
-  --bg-tertiary: #3c3a38;
+  /* Backgrounds - Dark metallic mercury with cool undertones */
+  --bg-primary: #1a1c1f;
+  --bg-secondary: #24262a;
+  --bg-tertiary: #2f3238;
 
-  /* Text - Warm light tones */
-  --text-primary: #f8f7f4;
-  --text-secondary: #a5a39f;
-  --text-tertiary: #7a7876;
+  /* Text - Cool metallic light tones */
+  --text-primary: #f4f5f7;
+  --text-secondary: #9ca0a8;
+  --text-tertiary: #71757e;
 
-  /* Borders - Warm subtle dark borders */
-  --border-color: #4a4846;
+  /* Borders - Dark metallic borders */
+  --border-color: #3d4048;
 
-  /* Accent - Warm lighter gray for dark mode */
-  --accent-color: #a5a39f;
-  --accent-hover: #dddbd8;
+  /* Accent - Lighter metallic steel for dark mode */
+  --accent-color: #9ca0a8;
+  --accent-hover: #c5c9d0;
 
   /* Status colors - Adjusted for dark mode */
   --success-color: #30d158;
