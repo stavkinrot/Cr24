@@ -190,10 +190,10 @@
   background-color: var(--bg-secondary);
   color: var(--text-primary);
   resize: none;
-  height: 40px;
+  height: 44px;
   max-height: 100px;
-  font-size: 14px;
-  line-height: 1.5;
+  font-size: 13px;
+  line-height: 1.4;
   transition: all var(--transition-base);
 }
 
@@ -206,6 +206,7 @@
 
 .chat-input::placeholder {
   color: var(--text-tertiary);
+  font-size: 12px;
 }
 
 .send-button {
