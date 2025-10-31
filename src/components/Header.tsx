@@ -15,7 +15,7 @@ const Header: React.FC<HeaderProps> = ({ onToggleSidebar, onOpenSettings }) => {
   return (
     <header className="header">
       <div className="header-left">
-        <h1 className="header-title">CRX Generator</h1>
+        <h1 className="header-title">Cr24 Extensions Generator</h1>
       </div>
       <div className="header-right">
         <button
