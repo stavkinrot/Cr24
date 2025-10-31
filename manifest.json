@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "Cr24 Extensions Generator",
+  "name": "Cr24 Extension Generator",
   "version": "1.0.0",
   "description": "Generate Chrome extensions using AI with live preview",
   "icons": {
@@ -10,7 +10,7 @@
   },
   "action": {
     "default_popup": "index.html",
-    "default_title": "Cr24 Extensions Generator"
+    "default_title": "Cr24 Extension Generator"
   },
   "permissions": [
     "storage",

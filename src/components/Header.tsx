@@ -16,7 +16,7 @@ const Header: React.FC<HeaderProps> = ({ onToggleSidebar, onOpenSettings }) => {
     <header className="header">
       <div className="header-left">
         <img src="/icons/icon48.png" alt="Cr24 Logo" className="header-logo" />
-        <h1 className="header-title">Cr24 Extensions Generator</h1>
+        <h1 className="header-title">Cr24 Extension Generator</h1>
       </div>
       <div className="header-right">
         <button
