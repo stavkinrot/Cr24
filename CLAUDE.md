@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-CRX Generator is a Chrome extension (Manifest V3) that uses OpenAI's API to generate Chrome extensions based on natural language descriptions. It's built with React + TypeScript + Vite and runs as a popup extension.
+Cr24 Extension Generator is a Chrome extension (Manifest V3) that uses OpenAI's API to generate Chrome extensions based on natural language descriptions. It's built with React + TypeScript + Vite and runs as a popup extension.
 
 ## Build Commands
 
@@ -322,7 +322,7 @@ Some websites implement extremely restrictive Content Security Policies with **T
 These sites require pre-compiled, signed scripts and cannot support dynamic content script injection in the live preview.
 
 **Workaround for Users:**
-1. Generate the extension in CRX Generator
+1. Generate the extension in Cr24 Extension Generator
 2. Download the extension files (ZIP)
 3. Install as a regular Chrome extension via chrome://extensions/
 4. The extension will work normally when installed, bypassing preview restrictions
@@ -361,7 +361,7 @@ The FileList component (`src/components/FileList.tsx`) uses JSZip to create down
 
 ### Required Manifest Permissions
 
-For the Chrome API bridge to work, the CRX Generator extension itself needs these permissions in `manifest.json`:
+For the Chrome API bridge to work, the Cr24 Extension Generator extension itself needs these permissions in `manifest.json`:
 
 ```json
 "permissions": [
@@ -423,7 +423,8 @@ OpenAI API calls have a 180-second (3 minute) timeout using AbortController. Thi
 - **GPT-4o, GPT-4o-mini, GPT-3.5-turbo**:
   - Support full temperature range 0-1
   - Streaming enabled for real-time response
-- Default model: `gpt-4o`
+- Default model: `gpt-5`
+- Available models: GPT-5, GPT-4.1, GPT-4o
 
 ## Component Hierarchy
 
@@ -440,7 +441,7 @@ App
 
 ## Common Gotchas
 
-1. **Popup Size**: The extension popup has fixed dimensions (800x600) set in `src/styles/global.css`. Chrome extensions need explicit width/height on html/body elements.
+1. **Popup Size**: The extension popup has fixed dimensions (750x550) set in `src/styles/global.css`. Chrome extensions need explicit width/height on html/body elements.
 
 2. **Manifest Copying**: If manifest.json or icons aren't in dist/, the extension won't load. Check the Vite plugin in `vite.config.ts`.
 
