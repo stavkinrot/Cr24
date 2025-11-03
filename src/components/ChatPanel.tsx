@@ -129,7 +129,7 @@ const ChatPanel: React.FC = () => {
                   </>
                 )}
                 <div className="message-time">
-                  {new Date(message.timestamp).toLocaleTimeString()}
+                  {new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                 </div>
               </div>
             </div>
