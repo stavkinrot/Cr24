@@ -1,168 +1,188 @@
-# CRX Generator - Setup Guide
+# Cr24 Extension Generator - Setup Guide
 
-## Quick Start (5 minutes)
+Complete setup instructions to get Cr24 Extension Generator running in Chrome.
 
-### Step 1: Install Dependencies
+## Prerequisites
+
+- **Node.js** v16 or higher ([Download](https://nodejs.org/))
+- **Chrome Browser** (latest version)
+- **OpenAI API Key** ([Get one here](https://platform.openai.com/api-keys))
+
+## Installation Steps
+
+### 1. Install Dependencies
+
 ```bash
 npm install
 ```
 
-### Step 2: Generate Icons
-1. Open `create-icons.html` in your browser
-2. Click each download button to get icon16.png, icon48.png, and icon128.png
-3. Save them in the `icons/` folder
+This will install all required packages including React, TypeScript, Vite, and JSZip.
 
-### Step 3: Build the Extension
+### 2. Build the Extension
+
 ```bash
 npm run build
 ```
 
-### Step 4: Load in Chrome
-1. Open Chrome and go to `chrome://extensions/`
-2. Enable "Developer mode" (toggle in top-right corner)
-3. Click "Load unpacked"
-4. Select the `dist` folder from this project
+This creates a production build in the `dist/` folder with:
+- Compiled JavaScript and CSS
+- Extension manifest
+- Icons and assets
+- Sandbox HTML for live preview
 
-### Step 5: Configure API Key
-1. Click the CRX Generator extension icon
-2. Click the settings icon (⚙️)
+### 3. Load Extension in Chrome
+
+1. Open Chrome and navigate to `chrome://extensions/`
+2. Enable **Developer mode** (toggle in top-right corner)
+3. Click **Load unpacked**
+4. Select the `dist/` folder from this project
+
+The Cr24 Extension Generator icon should now appear in your Chrome toolbar.
+
+### 4. Configure OpenAI API Key
+
+1. Click the Cr24 Extension Generator icon in your toolbar
+2. Click the **Settings** icon (⚙️) in the top-right
 3. Enter your OpenAI API key
-4. Choose your preferred model and temperature
-5. Click Save
+4. Choose your preferred model:
+   - **GPT-5** (default, most capable, temperature locked to 1.0)
+   - **GPT-4.1** (balanced performance)
+   - **GPT-4o** (fast and efficient)
+5. Adjust temperature if desired (0 = focused, 1 = creative)
+6. Click **Save**
 
-### Step 6: Create Your First Extension!
-1. In the chat input, describe the extension you want:
-   - "Create a word counter extension"
-   - "Make an extension that highlights all links in yellow"
-   - "Build a timer extension with start/stop buttons"
-2. Watch the AI generate your extension code
-3. See it preview in real-time
-4. Download the generated files
+Your settings are stored securely in Chrome's local storage.
+
+## Using Cr24 Extension Generator
+
+### Basic Usage
+
+1. Click the extension icon to open the popup
+2. Type a description of the extension you want to create:
+   ```
+   Create a word counter extension that shows the number of words on the current page
+   ```
+3. Press **Enter** or click **Send**
+4. Wait for the AI to generate your extension (this may take 30-60 seconds)
+5. View the live preview on the right side
+6. Download individual files or the complete ZIP
+
+### Example Prompts
+
+See [EXAMPLES.md](EXAMPLES.md) for a comprehensive list of example prompts.
+
+Quick examples:
+- "Create a Pomodoro timer with 25-minute work sessions"
+- "Build a dark mode toggle that works on any website"
+- "Make a color picker extension with hex code display"
+
+### Managing Chats
+
+- **New Chat**: Click the "+" button in the header
+- **Switch Chat**: Click a chat in the left sidebar
+- **Auto-Naming**: Chats are automatically named after the generated extension
+
+### Downloading Extensions
+
+Click the **Download ZIP** button to get all files in a single archive, or download individual files separately.
+
+To use your generated extension:
+1. Download the ZIP file
+2. Extract it to a folder
+3. Go to `chrome://extensions/`
+4. Click "Load unpacked"
+5. Select the extracted folder
 
 ## Development Mode
 
-For development with hot reload:
+For development with hot reload (browser preview only):
+
 ```bash
 npm run dev
 ```
 
-Then go to `http://localhost:5173` in your browser.
+Then open `http://localhost:5173` in your browser.
 
-Note: Some Chrome extension APIs won't work in dev mode. Build and load as an extension for full functionality.
+**Note**: Chrome extension APIs won't work in dev mode. Always build and load as an extension for full functionality testing.
 
 ## Troubleshooting
 
-### "No API key" error
-- Make sure you've entered your OpenAI API key in Settings
-- Verify the key starts with "sk-"
+### "No API key" Error
+- Ensure you've entered your OpenAI API key in Settings
+- Verify the key starts with `sk-` or `sk-proj-`
+- Check that your OpenAI account has available credits
 
-### Preview not showing
-- Click the refresh button (↻) in the preview panel
-- Check the browser console for errors
-- Make sure the generated code includes the required files
+### Preview Not Working
+- Click the **Refresh** button (↻) in the preview panel
+- Check browser console for errors (F12)
+- Verify the generated extension includes required files (popup.html, popup.js)
 
-### Extension not loading in Chrome
-- Check that you selected the `dist` folder, not the project root
-- Look for errors in `chrome://extensions/`
+### Extension Not Loading in Chrome
+- Make sure you selected the `dist/` folder, not the project root
+- Check for errors in `chrome://extensions/`
 - Try rebuilding: `npm run build`
 
-### Icons not showing
-- Generate PNG icons using `create-icons.html`
-- Make sure they're saved in the `icons/` folder
-- Rebuild the extension
+### Icons Not Showing
+- Icons are already included in the `icons/` folder
+- If missing, rebuild the extension: `npm run build`
+- Check that `vite.config.ts` copies icons to dist
+
+### GPT-5 Temperature Locked
+This is expected behavior. GPT-5 only supports temperature 1.0 due to OpenAI restrictions. The UI will automatically lock the slider when GPT-5 is selected.
+
+### Preview Shows "Blocked by CSP"
+Some websites (LinkedIn, Twitter) have strict Content Security Policies that block dynamic script injection. This is a limitation of the live preview. The generated extension will work normally when installed in Chrome.
 
 ## Project Structure
 
 ```
-crx-generator/
+Cr24.2/
 ├── dist/                 # Built extension (load this in Chrome)
-├── icons/               # Extension icons
+├── icons/               # Extension icons (16px, 48px, 128px)
+├── public/              # Static assets
+│   └── sandbox.html     # Sandboxed page for live preview
 ├── src/
-│   ├── components/      # UI components
+│   ├── components/      # React UI components
 │   │   ├── Header.tsx
 │   │   ├── ChatPanel.tsx
 │   │   ├── PreviewPanel.tsx
+│   │   ├── FileList.tsx
 │   │   ├── Sidebar.tsx
 │   │   └── SettingsModal.tsx
-│   ├── context/        # State management
-│   │   ├── ChatContext.tsx
-│   │   └── ThemeContext.tsx
-│   ├── styles/         # CSS files
-│   ├── types/          # TypeScript types
-│   ├── App.tsx         # Main component
-│   └── main.tsx        # Entry point
-├── index.html          # HTML template
-├── manifest.json       # Extension manifest
-├── package.json        # Dependencies
-├── vite.config.ts      # Build config
-└── README.md           # Documentation
+│   ├── context/         # React Context providers
+│   │   ├── ChatContext.tsx    # Chat and API logic
+│   │   └── ThemeContext.tsx   # Theme management
+│   ├── styles/          # Component CSS files
+│   ├── types/           # TypeScript definitions
+│   ├── App.tsx          # Main app component
+│   └── main.tsx         # Entry point
+├── index.html           # HTML template
+├── manifest.json        # Chrome extension manifest
+├── package.json         # Dependencies
+├── vite.config.ts       # Build configuration
+└── README.md            # Project overview
 ```
 
-## How It Works
+## Security Notes
 
-### Chat System
-- Uses OpenAI's Chat Completions API
-- System prompt guides the AI to generate proper extension code
-- Responses are parsed to extract extension files
-
-### Live Preview
-- **Popup Mode**: Renders popup.html in an iframe with injected CSS/JS
-- **Content Script Mode**: Simulates script injection on a demo page
-- Chrome APIs are partially simulated for preview purposes
-
-### Storage
-- Chat history stored in Chrome's local storage
-- Settings (API key, model, temperature) stored securely
-- Theme preference persisted
-
-## Customization
-
-### Adding New Models
-Edit `src/types/index.ts`:
-```typescript
-export interface Settings {
-  model: 'gpt-4' | 'gpt-4.1' | 'gpt-5' | 'your-model';
-  // ...
-}
-```
-
-### Changing Theme Colors
-Edit CSS variables in `src/styles/global.css`:
-```css
-:root {
-  --accent-color: #0066cc; /* Change this */
-  /* ... */
-}
-```
-
-### Improving AI Prompts
-Edit the system message in `src/context/ChatContext.tsx`:
-```typescript
-{
-  role: 'system',
-  content: `Your custom prompt here...`
-}
-```
-
-## API Key Security
-
-- Your API key is stored in Chrome's local storage
-- It's never sent anywhere except OpenAI's servers
-- The extension has minimal permissions
-- Consider using environment-based API keys for deployment
+- Your API key is stored locally in Chrome storage only
+- No data is sent anywhere except OpenAI's API
+- Chat history is stored locally in your browser
+- The extension has minimal permissions (storage, activeTab, scripting)
 
 ## Next Steps
 
-1. Generate some extensions and test the preview
-2. Customize the UI to match your preferences
-3. Add support for more extension types (background scripts, etc.)
-4. Improve the Chrome API simulation
-5. Add code syntax highlighting in the preview
+1. Read [EXAMPLES.md](EXAMPLES.md) for inspiration
+2. Generate your first extension
+3. Test the live preview functionality
+4. Download and install a generated extension
+5. Customize the UI theme (Light/Dark mode toggle in header)
 
 ## Getting Help
 
-- Check the README.md for detailed documentation
-- Review error messages in the browser console
-- Verify your OpenAI API key is valid and has credits
+- Check the [README.md](README.md) for project overview
+- Review browser console errors (F12 → Console tab)
+- Verify your OpenAI API key and credits
+- Ensure you're using the latest Chrome version
 
-Enjoy creating Chrome extensions with AI!
+Happy extension building with Cr24!
