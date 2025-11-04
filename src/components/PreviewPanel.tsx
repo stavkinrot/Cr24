@@ -699,15 +699,36 @@ ${html}
 
       // Inject JS if exists
       if (generatedExtension.files['popup.js']) {
-        // Wrap in DOMContentLoaded to ensure DOM is ready (mimics defer behavior)
+        let jsCode = generatedExtension.files['popup.js'];
+
+        // Check if the code has its own DOMContentLoaded listener
+        const hasDOMContentLoaded = /document\.addEventListener\s*\(\s*['"]DOMContentLoaded['"]/.test(jsCode);
+
+        if (hasDOMContentLoaded) {
+          // Replace DOMContentLoaded with immediate execution when DOM is ready
+          // This prevents double-wrapping: our wrapper + their listener = listener never fires
+          jsCode = jsCode.replace(
+            /document\.addEventListener\s*\(\s*['"]DOMContentLoaded['"]\s*,\s*(async\s+)?\(\s*\)\s*=>\s*\{/g,
+            (_match, asyncKeyword) => {
+              // Replace with IIFE that executes immediately if DOM is ready
+              return `(${asyncKeyword || ''}() => {`;
+            }
+          );
+
+          // Also need to close the listener properly - remove the closing }); for addEventListener
+          // Match: }); or }));  at the end (handling both cases with/without extra parens)
+          jsCode = jsCode.replace(/\}\s*\)\s*;?\s*$/g, '})();');
+        }
+
+        // Wrap in DOMContentLoaded check to ensure DOM is ready (mimics defer behavior)
         const wrappedJS = `
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', function() {
-    ${generatedExtension.files['popup.js']}
+    ${jsCode}
   });
 } else {
-  // DOM already loaded
-  ${generatedExtension.files['popup.js']}
+  // DOM already loaded, execute immediately
+  ${jsCode}
 }
 `;
         const scriptTag = `<script>${wrappedJS}</script>`;
