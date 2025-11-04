@@ -340,25 +340,34 @@ Make sure:
 - Use manifest version 3
 - ALWAYS use local file references (popup.css, popup.js) - NEVER use CDN links`;
 
+      // Build request body with model-specific token limit parameter
+      const requestBody: any = {
+        model: settings.model,
+        messages: [
+          {
+            role: 'system',
+            content: systemPrompt,
+          },
+          ...updatedMessages.map((m) => ({ role: m.role, content: m.content })),
+        ],
+        temperature: effectiveTemperature,
+        stream: useStreaming,
+      };
+
+      // GPT-5 uses max_completion_tokens, older models use max_tokens
+      if (settings.model === 'gpt-5') {
+        requestBody.max_completion_tokens = 5000;
+      } else {
+        requestBody.max_tokens = 5000;
+      }
+
       const response = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${settings.apiKey}`,
         },
-        body: JSON.stringify({
-          model: settings.model,
-          messages: [
-            {
-              role: 'system',
-              content: systemPrompt,
-            },
-            ...updatedMessages.map((m) => ({ role: m.role, content: m.content })),
-          ],
-          temperature: effectiveTemperature,
-          stream: useStreaming,
-          max_tokens: 5000, // Limit response length to improve speed and reduce verbosity
-        }),
+        body: JSON.stringify(requestBody),
         signal: controller.signal,
       });
 
