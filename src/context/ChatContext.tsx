@@ -354,12 +354,16 @@ Make sure:
         stream: useStreaming,
       };
 
-      // GPT-5 uses max_completion_tokens, older models use max_tokens
-      // Set to 20000 tokens to allow very complex extensions (dark mode, DOM manipulation, etc.)
+      // Set model-specific token limits based on each model's maximum
+      // GPT-5 uses max_completion_tokens, others use max_tokens
       if (settings.model === 'gpt-5') {
-        requestBody.max_completion_tokens = 20000;
+        requestBody.max_completion_tokens = 20000; // GPT-5 supports higher limits
+      } else if (settings.model === 'gpt-4o' || settings.model === 'gpt-4o-mini') {
+        requestBody.max_tokens = 16000; // GPT-4o max: 16384, use 16000 for safety
+      } else if (settings.model === 'gpt-4' || settings.model === 'gpt-4-turbo') {
+        requestBody.max_tokens = 4000; // GPT-4 max: 4096, use 4000 for safety
       } else {
-        requestBody.max_tokens = 20000;
+        requestBody.max_tokens = 4000; // GPT-3.5-turbo and others: 4096 max
       }
 
       const response = await fetch('https://api.openai.com/v1/chat/completions', {
