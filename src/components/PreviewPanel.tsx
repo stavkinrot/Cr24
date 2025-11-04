@@ -707,6 +707,8 @@ ${html}
         if (hasDOMContentLoaded) {
           // Replace DOMContentLoaded with immediate execution when DOM is ready
           // This prevents double-wrapping: our wrapper + their listener = listener never fires
+
+          // Case 1: Arrow function - document.addEventListener('DOMContentLoaded', async () => { ... });
           jsCode = jsCode.replace(
             /document\.addEventListener\s*\(\s*['"]DOMContentLoaded['"]\s*,\s*(async\s+)?\(\s*\)\s*=>\s*\{/g,
             (_match, asyncKeyword) => {
@@ -715,7 +717,16 @@ ${html}
             }
           );
 
-          // Also need to close the listener properly - remove the closing }); for addEventListener
+          // Case 2: Named function reference - document.addEventListener('DOMContentLoaded', functionName);
+          jsCode = jsCode.replace(
+            /document\.addEventListener\s*\(\s*['"]DOMContentLoaded['"]\s*,\s*(\w+)\s*\)\s*;?/g,
+            (_match, functionName) => {
+              // Replace with immediate function call
+              return `${functionName}();`;
+            }
+          );
+
+          // Also need to close the listener properly - remove the closing }); for addEventListener (Case 1 only)
           // Match: }); or }));  at the end (handling both cases with/without extra parens)
           jsCode = jsCode.replace(/\}\s*\)\s*;?\s*$/g, '})();');
         }

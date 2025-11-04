@@ -218,6 +218,10 @@ CRITICAL REQUIREMENTS:
    - MUST declare "action": { "default_popup": "popup.html" }
    - MUST declare "content_scripts": [{ "matches": ["<all_urls>"], "js": ["content.js"] }]
    - Adjust "matches" pattern based on extension purpose (use specific URLs if needed)
+   - PERMISSIONS: Use "activeTab" permission (NOT "tabs") when popup needs to communicate with content scripts
+     Example: "permissions": ["activeTab"]
+     ⚠️ CRITICAL: "activeTab" is required for chrome.tabs.sendMessage() and chrome.tabs.query()
+     ❌ DO NOT use "tabs" permission - it requires additional host permissions
 
 3. FILE REFERENCES (CRITICAL):
    - popup.html MUST reference LOCAL files: <link href="popup.css"> and <script src="popup.js">
