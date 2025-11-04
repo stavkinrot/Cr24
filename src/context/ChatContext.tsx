@@ -324,9 +324,10 @@ CRITICAL REQUIREMENTS:
    - Validate user inputs
    - Use modern JavaScript (ES6+): const/let, arrow functions, async/await
    - Add helpful comments for complex logic
-   - ❌ DO NOT use document.addEventListener('DOMContentLoaded', ...) in popup.js
-   - ✅ Instead: Wrap code in IIFE and execute immediately - the popup loads with defer behavior
-   - Example: (() => { /* your code here */ })();
+   - SCRIPT PLACEMENT: Place <script src="popup.js"> at END of <body> (before </body>)
+   - This ensures DOM is ready without needing DOMContentLoaded
+   - If you must access DOM elements, either place script at end OR use DOMContentLoaded
+   - Example with script at end: <body>...<script src="popup.js"></script></body>
 
 7. RESPONSIVENESS:
    - Design for 400px-600px width (standard Chrome popup sizes)
