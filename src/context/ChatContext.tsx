@@ -175,14 +175,19 @@ Created a [Extension Name] Chrome extension that [brief description of functiona
     "name": "Extension Name",
     "version": "1.0.0",
     "description": "...",
-    // other manifest fields
+    "action": { "default_popup": "popup.html" },
+    "content_scripts": [
+      {
+        "matches": ["<all_urls>"],
+        "js": ["content.js"]
+      }
+    ]
   },
   "files": {
     "popup.html": "complete HTML code here",
     "popup.js": "complete JavaScript code here",
     "popup.css": "complete CSS code here",
-    "content.js": "complete content script code here (if needed)",
-    // other files as needed
+    "content.js": "complete content script code here"
   },
   "type": "popup"
 }
@@ -190,20 +195,37 @@ Created a [Extension Name] Chrome extension that [brief description of functiona
 
 CRITICAL REQUIREMENTS:
 
-1. MANIFEST VALIDATION:
+1. EXACT FILE STRUCTURE (MANDATORY):
+   ⚠️ IMPORTANT: Every extension has EXACTLY 5 components:
+
+   **1. manifest** (separate field in JSON response):
+   - Contains manifest.json content
+   - Required fields: manifest_version, name, version, description, action, content_scripts
+
+   **2-5. files** (exactly 4 files in the "files" object):
+   - "popup.html" - The popup interface HTML
+   - "popup.css" - The popup styles (external modular CSS)
+   - "popup.js" - The popup JavaScript logic
+   - "content.js" - Content script that runs on web pages
+
+   ❌ DO NOT create additional files in "files" object (no background.js, no icons, no extra scripts)
+   ❌ DO NOT omit any of these 4 files - all MUST be present
+   ❌ DO NOT put manifest.json in the "files" object - it's a separate "manifest" field
+
+2. MANIFEST VALIDATION:
    - manifest_version MUST be 3
    - MUST include: name (max 45 chars), version (x.y.z format), description
-   - If popup extension: MUST declare "action": { "default_popup": "popup.html" }
-   - If content scripts: MUST declare "content_scripts" array with js/css files
-   - Icons MUST be PNG format in sizes 16, 32, 48, 128
+   - MUST declare "action": { "default_popup": "popup.html" }
+   - MUST declare "content_scripts": [{ "matches": ["<all_urls>"], "js": ["content.js"] }]
+   - Adjust "matches" pattern based on extension purpose (use specific URLs if needed)
 
-2. FILE REFERENCES (CRITICAL):
-   - popup.html MUST reference LOCAL files only: <link href="popup.css"> and <script src="popup.js">
+3. FILE REFERENCES (CRITICAL):
+   - popup.html MUST reference LOCAL files: <link href="popup.css"> and <script src="popup.js">
    - NO external CDN links (no https://, no http://, no //)
-   - All referenced files MUST exist in the "files" object
-   - Content scripts declared in manifest MUST exist in files
+   - All referenced files MUST be exactly: popup.css, popup.js
+   - content.js MUST be declared in manifest.content_scripts
 
-3. BEAUTIFUL UI DESIGN SYSTEM:
+4. BEAUTIFUL UI DESIGN SYSTEM:
    Use EXTERNAL MODULAR CSS with design tokens in popup.css:
 
    /* Design Tokens */
@@ -284,14 +306,14 @@ CRITICAL REQUIREMENTS:
      margin-bottom: var(--spacing-md);
    }
 
-4. HTML BEST PRACTICES:
+5. HTML BEST PRACTICES:
    - Use semantic HTML5: <header>, <main>, <section>, <article>
    - Proper heading hierarchy: h1 → h2 → h3
    - Labels for all form inputs: <label for="id">Label</label>
    - ARIA labels for accessibility: aria-label, aria-describedby
    - Use Flexbox/Grid for layouts (NO tables for layout)
 
-5. CODE QUALITY:
+6. CODE QUALITY:
    - Be concise but complete - avoid unnecessary verbosity
    - Include error handling in JavaScript
    - Add loading states for async operations
@@ -299,10 +321,17 @@ CRITICAL REQUIREMENTS:
    - Use modern JavaScript (ES6+): const/let, arrow functions, async/await
    - Add helpful comments for complex logic
 
-6. RESPONSIVENESS:
+7. RESPONSIVENESS:
    - Design for 400px-600px width (standard Chrome popup sizes)
    - Use flexible layouts that adapt to content
    - Test with various content lengths
+
+8. CONTENT SCRIPT GUIDELINES:
+   - content.js runs on web pages specified in manifest.content_scripts.matches
+   - Can interact with page DOM, modify elements, listen to events
+   - Has access to chrome.runtime.sendMessage() to communicate with popup
+   - Should be lightweight and non-intrusive
+   - If extension doesn't need to modify web pages, content.js can be minimal (just a comment explaining it's unused)
 
 Make sure:
 - The summary is conversational and explains what you built

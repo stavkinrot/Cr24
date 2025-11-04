@@ -76,58 +76,56 @@ function validateManifest(manifest: any): ValidationError[] {
 }
 
 /**
- * Validates that required files exist based on extension type
+ * Validates that EXACTLY the required files exist - no more, no less
+ *
+ * Extension structure: manifest.json (validated separately) + 4 files
+ * Required files in "files" object: content.js, popup.html, popup.css, popup.js
  */
-function validateFiles(files: Record<string, string>, manifest: any): ValidationError[] {
+function validateFiles(files: Record<string, string>): ValidationError[] {
   const errors: ValidationError[] = [];
 
   if (!files || Object.keys(files).length === 0) {
     errors.push({
       field: 'files',
-      message: 'No files generated',
+      message: 'No files generated. Required: content.js, popup.html, popup.css, popup.js',
       severity: 'error',
     });
     return errors;
   }
 
-  // Check for popup extension files
-  const hasPopupAction = manifest?.action || manifest?.browser_action;
-  if (hasPopupAction) {
-    const popupHtml = hasPopupAction.default_popup;
-    if (popupHtml && !files[popupHtml]) {
+  // EXACT required files - no more, no less (manifest.json is separate)
+  const requiredFiles = ['content.js', 'popup.html', 'popup.css', 'popup.js'];
+  const actualFiles = Object.keys(files);
+
+  // Check for missing files
+  for (const requiredFile of requiredFiles) {
+    if (!files[requiredFile]) {
       errors.push({
         field: 'files',
-        message: `Popup HTML file "${popupHtml}" declared in manifest but not found in files`,
+        message: `Required file "${requiredFile}" is missing. All extensions must have exactly 4 files: content.js, popup.html, popup.css, popup.js (plus manifest.json which is separate)`,
         severity: 'error',
       });
     }
   }
 
-  // Check for content scripts
-  const contentScripts = manifest?.content_scripts || [];
-  for (const script of contentScripts) {
-    if (script.js) {
-      for (const jsFile of script.js) {
-        if (!files[jsFile]) {
-          errors.push({
-            field: 'files',
-            message: `Content script "${jsFile}" declared in manifest but not found in files`,
-            severity: 'error',
-          });
-        }
-      }
+  // Check for extra files (not allowed)
+  for (const actualFile of actualFiles) {
+    if (!requiredFiles.includes(actualFile)) {
+      errors.push({
+        field: 'files',
+        message: `Unexpected file "${actualFile}" found. Extensions must have ONLY 4 files: content.js, popup.html, popup.css, popup.js (no background.js, no icons, no additional files). manifest.json is separate.`,
+        severity: 'error',
+      });
     }
-    if (script.css) {
-      for (const cssFile of script.css) {
-        if (!files[cssFile]) {
-          errors.push({
-            field: 'files',
-            message: `Content CSS "${cssFile}" declared in manifest but not found in files`,
-            severity: 'error',
-          });
-        }
-      }
-    }
+  }
+
+  // Check exact count
+  if (actualFiles.length !== requiredFiles.length) {
+    errors.push({
+      field: 'files',
+      message: `Expected exactly ${requiredFiles.length} files, but found ${actualFiles.length}. Required: content.js, popup.html, popup.css, popup.js (manifest.json is validated separately)`,
+      severity: 'error',
+    });
   }
 
   return errors;
@@ -239,30 +237,37 @@ function validatePopupContract(htmlContent: string, files: Record<string, string
 
 /**
  * Validates content script contract
+ * Since content.js always exists, ensure it's properly declared in manifest
  */
-function validateContentScriptContract(manifest: any, files: Record<string, string>): ValidationError[] {
+function validateContentScriptContract(manifest: any): ValidationError[] {
   const errors: ValidationError[] = [];
 
+  // content.js is guaranteed to exist (validated in validateFiles)
+  // Check if it's declared in manifest.content_scripts
   const contentScripts = manifest?.content_scripts || [];
-  const hasContentScriptInManifest = contentScripts.length > 0;
-  const hasContentScriptFile = 'content.js' in files || Object.keys(files).some(f => f.includes('content'));
+  const hasContentScriptInManifest = contentScripts.some((script: any) =>
+    script.js && script.js.includes('content.js')
+  );
 
-  // If content.js exists but not declared in manifest
-  if (hasContentScriptFile && !hasContentScriptInManifest) {
+  if (!hasContentScriptInManifest) {
     errors.push({
       field: 'manifest.content_scripts',
-      message: 'Content script file exists but not declared in manifest.content_scripts',
+      message: 'content.js must be declared in manifest.content_scripts array with matches pattern',
       severity: 'error',
     });
-  }
+  } else {
+    // Validate that content_scripts has proper structure
+    const contentScriptEntry = contentScripts.find((script: any) =>
+      script.js && script.js.includes('content.js')
+    );
 
-  // If content_scripts declared but files missing
-  if (hasContentScriptInManifest && !hasContentScriptFile) {
-    errors.push({
-      field: 'files',
-      message: 'Content scripts declared in manifest but no content script files found',
-      severity: 'error',
-    });
+    if (contentScriptEntry && (!contentScriptEntry.matches || contentScriptEntry.matches.length === 0)) {
+      errors.push({
+        field: 'manifest.content_scripts',
+        message: 'content_scripts must specify "matches" pattern (e.g., ["<all_urls>"] or specific URLs)',
+        severity: 'error',
+      });
+    }
   }
 
   return errors;
@@ -346,20 +351,16 @@ export function validateExtension(extensionData: GeneratedExtension): Validation
   // Validate manifest
   allErrors.push(...validateManifest(extensionData.manifest));
 
-  // Validate files exist
-  allErrors.push(...validateFiles(extensionData.files, extensionData.manifest));
+  // Validate files exist (exact 4 files required)
+  allErrors.push(...validateFiles(extensionData.files));
 
-  // Validate popup contract if popup extension
-  const popupHtmlPath = extensionData.manifest?.action?.default_popup ||
-                        extensionData.manifest?.browser_action?.default_popup ||
-                        'popup.html';
-
-  if (extensionData.files[popupHtmlPath]) {
-    allErrors.push(...validatePopupContract(extensionData.files[popupHtmlPath], extensionData.files));
+  // Validate popup contract if popup.html exists
+  if (extensionData.files['popup.html']) {
+    allErrors.push(...validatePopupContract(extensionData.files['popup.html'], extensionData.files));
   }
 
   // Validate content script contract
-  allErrors.push(...validateContentScriptContract(extensionData.manifest, extensionData.files));
+  allErrors.push(...validateContentScriptContract(extensionData.manifest));
 
   // Validate icons
   allErrors.push(...validateIcons(extensionData.manifest, extensionData.files));
