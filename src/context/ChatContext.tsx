@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { Chat, Message, Settings, GeneratedExtension } from '../types';
+import { validateExtension, formatValidationErrors } from '../utils/extensionValidator';
 
 interface ChatContextType {
   currentChat: Chat | null;
@@ -157,7 +158,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minute timeout
 
-      const systemPrompt = `You are an expert Chrome extension developer. Generate complete, working Chrome extension code based on user requirements.
+      const systemPrompt = `You are an expert Chrome extension developer. Generate complete, working, BEAUTIFUL Chrome extension code based on user requirements.
 
 IMPORTANT: Your response should have TWO parts:
 
@@ -187,11 +188,128 @@ Created a [Extension Name] Chrome extension that [brief description of functiona
 }
 \`\`\`
 
+CRITICAL REQUIREMENTS:
+
+1. MANIFEST VALIDATION:
+   - manifest_version MUST be 3
+   - MUST include: name (max 45 chars), version (x.y.z format), description
+   - If popup extension: MUST declare "action": { "default_popup": "popup.html" }
+   - If content scripts: MUST declare "content_scripts" array with js/css files
+   - Icons MUST be PNG format in sizes 16, 32, 48, 128
+
+2. FILE REFERENCES (CRITICAL):
+   - popup.html MUST reference LOCAL files only: <link href="popup.css"> and <script src="popup.js">
+   - NO external CDN links (no https://, no http://, no //)
+   - All referenced files MUST exist in the "files" object
+   - Content scripts declared in manifest MUST exist in files
+
+3. BEAUTIFUL UI DESIGN SYSTEM:
+   Use EXTERNAL MODULAR CSS with design tokens in popup.css:
+
+   /* Design Tokens */
+   :root {
+     --primary-color: #4f46e5;
+     --primary-hover: #4338ca;
+     --secondary-color: #8b5cf6;
+     --bg-color: #ffffff;
+     --surface-color: #f9fafb;
+     --text-color: #1f2937;
+     --text-secondary: #6b7280;
+     --border-color: #e5e7eb;
+     --border-radius: 8px;
+     --spacing-xs: 4px;
+     --spacing-sm: 8px;
+     --spacing-md: 16px;
+     --spacing-lg: 24px;
+     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+     --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.1);
+     --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.1);
+   }
+
+   body {
+     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+     margin: 0;
+     padding: var(--spacing-md);
+     background: var(--bg-color);
+     color: var(--text-color);
+     width: 400px; /* Standard popup width */
+   }
+
+   /* Modern Button Style */
+   button {
+     background: var(--primary-color);
+     color: white;
+     border: none;
+     padding: var(--spacing-sm) var(--spacing-md);
+     border-radius: var(--border-radius);
+     cursor: pointer;
+     font-size: 14px;
+     font-weight: 500;
+     transition: all 0.2s;
+     box-shadow: var(--shadow-sm);
+   }
+
+   button:hover {
+     background: var(--primary-hover);
+     box-shadow: var(--shadow-md);
+     transform: translateY(-1px);
+   }
+
+   button:active {
+     transform: translateY(0);
+   }
+
+   /* Modern Input Style */
+   input, textarea, select {
+     width: 100%;
+     padding: var(--spacing-sm);
+     border: 1px solid var(--border-color);
+     border-radius: var(--border-radius);
+     font-size: 14px;
+     transition: border-color 0.2s;
+   }
+
+   input:focus, textarea:focus, select:focus {
+     outline: none;
+     border-color: var(--primary-color);
+     box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1);
+   }
+
+   /* Card Style */
+   .card {
+     background: var(--surface-color);
+     border-radius: var(--border-radius);
+     padding: var(--spacing-md);
+     box-shadow: var(--shadow-sm);
+     margin-bottom: var(--spacing-md);
+   }
+
+4. HTML BEST PRACTICES:
+   - Use semantic HTML5: <header>, <main>, <section>, <article>
+   - Proper heading hierarchy: h1 → h2 → h3
+   - Labels for all form inputs: <label for="id">Label</label>
+   - ARIA labels for accessibility: aria-label, aria-describedby
+   - Use Flexbox/Grid for layouts (NO tables for layout)
+
+5. CODE QUALITY:
+   - Be concise but complete - avoid unnecessary verbosity
+   - Include error handling in JavaScript
+   - Add loading states for async operations
+   - Validate user inputs
+   - Use modern JavaScript (ES6+): const/let, arrow functions, async/await
+   - Add helpful comments for complex logic
+
+6. RESPONSIVENESS:
+   - Design for 400px-600px width (standard Chrome popup sizes)
+   - Use flexible layouts that adapt to content
+   - Test with various content lengths
+
 Make sure:
 - The summary is conversational and explains what you built
 - All code is production-ready and follows Chrome extension best practices
 - Include all necessary files (HTML, CSS, JS)
-- Use manifest version 3`;
+- Use manifest version 3
+- ALWAYS use local file references (popup.css, popup.js) - NEVER use CDN links`;
 
       const response = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
@@ -210,6 +328,7 @@ Make sure:
           ],
           temperature: effectiveTemperature,
           stream: useStreaming,
+          max_tokens: 5000, // Limit response length to improve speed and reduce verbosity
         }),
         signal: controller.signal,
       });
@@ -306,21 +425,17 @@ Make sure:
         console.log('Final accumulated content length:', accumulatedContent.length);
       } else {
         // Non-streaming response (for GPT-5)
-        // Show progress stages to provide feedback during long wait (up to 6 minutes)
+        // Show progress stages to provide feedback during wait (target: 60-90 seconds)
+        // Optimized with max_tokens=5000 and enhanced prompt for faster generation
         const progressStages = [
-          { delay: 0, message: 'Analyzing your requirements...' },
-          { delay: 8000, message: 'Designing extension architecture...' },
-          { delay: 20000, message: 'Planning file structure...' },
-          { delay: 35000, message: 'Generating manifest.json...' },
-          { delay: 55000, message: 'Creating popup interface...' },
-          { delay: 80000, message: 'Writing HTML markup...' },
-          { delay: 110000, message: 'Styling with CSS...' },
-          { delay: 145000, message: 'Implementing core JavaScript logic...' },
-          { delay: 185000, message: 'Adding Chrome API integration...' },
-          { delay: 230000, message: 'Implementing event handlers...' },
-          { delay: 275000, message: 'Optimizing and testing code...' },
-          { delay: 320000, message: 'Finalizing extension files...' },
-          { delay: 350000, message: 'Almost ready, just a moment longer...' },
+          { delay: 0, message: 'Analyzing your requirements... (~60s remaining)', percent: 10 },
+          { delay: 10000, message: 'Designing extension architecture... (~50s remaining)', percent: 25 },
+          { delay: 25000, message: 'Generating extension files... (~35s remaining)', percent: 45 },
+          { delay: 40000, message: 'Writing HTML, CSS, and JavaScript... (~25s remaining)', percent: 60 },
+          { delay: 55000, message: 'Implementing functionality... (~15s remaining)', percent: 75 },
+          { delay: 70000, message: 'Finalizing and optimizing... (~10s remaining)', percent: 85 },
+          { delay: 80000, message: 'Almost ready... (~5s remaining)', percent: 95 },
+          { delay: 90000, message: 'Completing generation...', percent: 98 },
         ];
 
         // Helper function to update progress stage
@@ -422,23 +537,83 @@ Make sure:
           accumulatedContent.match(/\{[\s\S]*\}/);
         if (jsonMatch) {
           const extensionData = JSON.parse(jsonMatch[1] || jsonMatch[0]);
-          setGeneratedExtension(extensionData);
 
-          // Use the manifest name as the chat title
-          const chatTitle = extensionData.manifest?.name || currentChat.title;
-          console.log('Updated chat title from manifest:', chatTitle);
+          // Validate extension
+          console.log('Validating generated extension...');
+          const validationResult = validateExtension(extensionData);
 
-          // Save extension to the current chat with updated title
-          const chatWithExtension = { ...finalChat, generatedExtension: extensionData, title: chatTitle };
-          setCurrentChat(chatWithExtension);
-          const chatsWithExtension = chats.map((c) =>
-            c.id === currentChat.id ? chatWithExtension : c
-          );
-          setChats(chatsWithExtension);
-          chrome.storage.local.set({ chats: chatsWithExtension });
+          // Log validation results
+          if (validationResult.errors.length > 0) {
+            console.error('Extension validation errors:', validationResult.errors);
+          }
+          if (validationResult.warnings.length > 0) {
+            console.warn('Extension validation warnings:', validationResult.warnings);
+          }
+
+          // Only save extension if validation passes (no errors)
+          if (validationResult.isValid) {
+            console.log('✅ Extension validation passed!');
+            setGeneratedExtension(extensionData);
+
+            // Use the manifest name as the chat title
+            const chatTitle = extensionData.manifest?.name || currentChat.title;
+            console.log('Updated chat title from manifest:', chatTitle);
+
+            // Save extension to the current chat with updated title
+            const chatWithExtension = { ...finalChat, generatedExtension: extensionData, title: chatTitle };
+            setCurrentChat(chatWithExtension);
+            const chatsWithExtension = chats.map((c) =>
+              c.id === currentChat.id ? chatWithExtension : c
+            );
+            setChats(chatsWithExtension);
+            chrome.storage.local.set({ chats: chatsWithExtension });
+
+            // If there are warnings, add them to chat (optional)
+            if (validationResult.warnings.length > 0) {
+              console.log('Extension has warnings:', formatValidationErrors(validationResult));
+            }
+          } else {
+            // Validation failed - show errors to user
+            console.error('❌ Extension validation failed');
+            const validationErrorMessage = formatValidationErrors(validationResult);
+
+            // Add validation error message to chat
+            const validationMessage: Message = {
+              id: (Date.now() + 2).toString(),
+              role: 'assistant',
+              content: `⚠️ Extension validation failed:\n\n${validationErrorMessage}\n\nPlease try regenerating the extension or provide more specific requirements.`,
+              timestamp: Date.now(),
+            };
+
+            const messagesWithValidation = [...finalMessages, validationMessage];
+            const chatWithValidation = { ...finalChat, messages: messagesWithValidation };
+            setCurrentChat(chatWithValidation);
+            const chatsWithValidation = chats.map((c) =>
+              c.id === currentChat.id ? chatWithValidation : c
+            );
+            setChats(chatsWithValidation);
+            chrome.storage.local.set({ chats: chatsWithValidation });
+          }
         }
       } catch (e) {
         console.error('Failed to parse extension data:', e);
+
+        // Add parsing error message to chat
+        const parseErrorMessage: Message = {
+          id: (Date.now() + 3).toString(),
+          role: 'assistant',
+          content: `❌ Failed to parse extension code: ${e instanceof Error ? e.message : 'Invalid JSON format'}\n\nPlease try again or rephrase your request.`,
+          timestamp: Date.now(),
+        };
+
+        const messagesWithError = [...finalMessages, parseErrorMessage];
+        const chatWithError = { ...finalChat, messages: messagesWithError };
+        setCurrentChat(chatWithError);
+        const chatsWithError = chats.map((c) =>
+          c.id === currentChat.id ? chatWithError : c
+        );
+        setChats(chatsWithError);
+        chrome.storage.local.set({ chats: chatsWithError });
       }
     } catch (error) {
       console.error('Error calling OpenAI API:', error);

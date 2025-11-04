@@ -36,3 +36,15 @@ export interface PreviewState {
   isLoading: boolean;
   error: string | null;
 }
+
+export interface ValidationError {
+  field: string;
+  message: string;
+  severity: 'error' | 'warning';
+}
+
+export interface ValidationResult {
+  isValid: boolean;
+  errors: ValidationError[];
+  warnings: ValidationError[];
+}
