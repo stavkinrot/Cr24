@@ -324,6 +324,9 @@ CRITICAL REQUIREMENTS:
    - Validate user inputs
    - Use modern JavaScript (ES6+): const/let, arrow functions, async/await
    - Add helpful comments for complex logic
+   - ❌ DO NOT use document.addEventListener('DOMContentLoaded', ...) in popup.js
+   - ✅ Instead: Wrap code in IIFE and execute immediately - the popup loads with defer behavior
+   - Example: (() => { /* your code here */ })();
 
 7. RESPONSIVENESS:
    - Design for 400px-600px width (standard Chrome popup sizes)
@@ -336,6 +339,14 @@ CRITICAL REQUIREMENTS:
    - Has access to chrome.runtime.sendMessage() to communicate with popup
    - Should be lightweight and non-intrusive
    - If extension doesn't need to modify web pages, content.js can be minimal (just a comment explaining it's unused)
+   - ⚠️ CRITICAL: chrome.runtime.onMessage.addListener() MUST return true to keep message channel open
+   - Without return true, sendResponse() will fail silently
+   - Example:
+     chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+       // handle message
+       sendResponse({ result: 'data' });
+       return true; // REQUIRED - keeps channel open for async responses
+     });
 
 Make sure:
 - The summary is conversational and explains what you built
