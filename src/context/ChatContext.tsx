@@ -468,25 +468,42 @@ Make sure:
         console.log('Final accumulated content length:', accumulatedContent.length);
       } else {
         // Non-streaming response (for GPT-5)
-        // Show progress stages to provide feedback during wait (target: 60-90 seconds)
-        // Optimized with max_tokens=5000 and enhanced prompt for faster generation
-        const progressStages = [
-          { delay: 0, message: 'Analyzing your requirements... (~60s remaining)', percent: 10 },
-          { delay: 10000, message: 'Designing extension architecture... (~50s remaining)', percent: 25 },
-          { delay: 25000, message: 'Generating extension files... (~35s remaining)', percent: 45 },
-          { delay: 40000, message: 'Writing HTML, CSS, and JavaScript... (~25s remaining)', percent: 60 },
-          { delay: 55000, message: 'Implementing functionality... (~15s remaining)', percent: 75 },
-          { delay: 70000, message: 'Finalizing and optimizing... (~10s remaining)', percent: 85 },
-          { delay: 80000, message: 'Almost ready... (~5s remaining)', percent: 95 },
-          { delay: 90000, message: 'Completing generation...', percent: 98 },
+        // Show progress stages with dynamic, fun messages like Claude Code
+        const funnyMessages = [
+          'Thinking', 'Pondering', 'Analyzing', 'Brainstorming', 'Contemplating',
+          'Ideating', 'Architecting', 'Designing', 'Blueprinting', 'Sketching',
+          'Crafting', 'Building', 'Constructing', 'Assembling', 'Weaving',
+          'Coding', 'Typing', 'Scripting', 'Programming', 'Compiling',
+          'Generating', 'Creating', 'Manifesting', 'Conjuring', 'Materializing',
+          'Polishing', 'Refining', 'Optimizing', 'Perfecting', 'Fine-tuning',
+          'Seasoning', 'Marinating', 'Simmering', 'Baking', 'Sautéing',
+          'Mixing', 'Blending', 'Whisking', 'Kneading', 'Folding',
+          'Emulsifying', 'Caramelizing', 'Glazing', 'Garnishing', 'Plating'
         ];
 
-        // Helper function to update progress stage
-        const updateProgressStage = (stage: { message: string }, index: number) => {
+        const progressStages = [
+          { delay: 0, messageBase: funnyMessages[Math.floor(Math.random() * 5)], percent: 10 },
+          { delay: 8000, messageBase: funnyMessages[5 + Math.floor(Math.random() * 5)], percent: 20 },
+          { delay: 16000, messageBase: funnyMessages[10 + Math.floor(Math.random() * 5)], percent: 30 },
+          { delay: 24000, messageBase: funnyMessages[15 + Math.floor(Math.random() * 5)], percent: 40 },
+          { delay: 32000, messageBase: funnyMessages[20 + Math.floor(Math.random() * 5)], percent: 50 },
+          { delay: 40000, messageBase: funnyMessages[25 + Math.floor(Math.random() * 5)], percent: 60 },
+          { delay: 48000, messageBase: funnyMessages[30 + Math.floor(Math.random() * 5)], percent: 70 },
+          { delay: 56000, messageBase: funnyMessages[35 + Math.floor(Math.random() * 5)], percent: 80 },
+          { delay: 64000, messageBase: funnyMessages[40 + Math.floor(Math.random() * 5)], percent: 90 },
+        ];
+
+        // Helper function to update progress stage with dynamic dots
+        let dotCount = 0;
+        const maxDots = 3;
+        const updateProgressStage = (stage: { messageBase: string }, index: number) => {
+          const dots = '.'.repeat((dotCount % (maxDots + 1)));
+          dotCount++;
+
           const updatedAssistantMessage: Message = {
             ...assistantMessage,
             content: '',
-            displayContent: stage.message,
+            displayContent: `${stage.messageBase}${dots}`,
             isGenerating: true,
             progressStage: index,
           };
@@ -511,12 +528,19 @@ Make sure:
         };
 
         // Show first stage immediately
+        let currentStageIndex = 0;
         updateProgressStage(progressStages[0], 0);
 
+        // Animate dots every 400ms for current stage
+        const dotAnimationInterval = window.setInterval(() => {
+          updateProgressStage(progressStages[currentStageIndex], currentStageIndex);
+        }, 400);
+
         // Start progress stage updates for remaining stages
-        const progressIntervals: number[] = [];
+        const progressIntervals: number[] = [dotAnimationInterval];
         progressStages.slice(1).forEach((stage, index) => {
           const timeoutId = window.setTimeout(() => {
+            currentStageIndex = index + 1;
             updateProgressStage(stage, index + 1);
           }, stage.delay);
 
@@ -539,8 +563,11 @@ Make sure:
           throw new Error('Empty response from OpenAI API. The model may have hit token limits or encountered an error.');
         }
 
-        // Clear all pending progress intervals
-        progressIntervals.forEach(id => clearTimeout(id));
+        // Clear all pending progress intervals and the dot animation interval
+        progressIntervals.forEach(id => {
+          clearTimeout(id);
+          clearInterval(id); // Also clear in case it's the dot animation interval
+        });
 
         // Extract summary for non-streaming too
         const summaryEndIndex = accumulatedContent.indexOf('```json');

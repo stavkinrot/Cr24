@@ -8,11 +8,48 @@ const ChatPanel: React.FC = () => {
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [messageExtensions, setMessageExtensions] = useState<Map<string, any>>(new Map());
+  const [loadingDots, setLoadingDots] = useState('');
+  const [loadingMessage, setLoadingMessage] = useState('Thinking');
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Funny loading messages
+  const funnyMessages = [
+    'Thinking', 'Pondering', 'Analyzing', 'Brainstorming', 'Contemplating',
+    'Ideating', 'Scheming', 'Plotting', 'Calculating', 'Computing'
+  ];
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [currentChat?.messages]);
+
+  // Animate loading dots and message when loading
+  useEffect(() => {
+    if (!isLoading) {
+      setLoadingDots('');
+      setLoadingMessage('Thinking');
+      return;
+    }
+
+    let dotCount = 0;
+    let messageIndex = 0;
+
+    // Animate dots every 400ms
+    const dotInterval = setInterval(() => {
+      dotCount = (dotCount + 1) % 4;
+      setLoadingDots('.'.repeat(dotCount));
+    }, 400);
+
+    // Change message every 2 seconds
+    const messageInterval = setInterval(() => {
+      messageIndex = (messageIndex + 1) % funnyMessages.length;
+      setLoadingMessage(funnyMessages[messageIndex]);
+    }, 2000);
+
+    return () => {
+      clearInterval(dotInterval);
+      clearInterval(messageInterval);
+    };
+  }, [isLoading]);
 
   // Track which messages have generated extensions
   useEffect(() => {
@@ -113,7 +150,7 @@ const ChatPanel: React.FC = () => {
                   </div>
                 ) : isInitialStreaming ? (
                   <div className="message-text streaming">
-                    <span className="streaming-indicator">●</span> Thinking...
+                    <span className="streaming-indicator">●</span> {loadingMessage}{loadingDots}
                   </div>
                 ) : (
                   <>
