@@ -654,47 +654,68 @@ Make sure:
               console.log('Extension has warnings:', formatValidationErrors(validationResult));
             }
           } else {
-            // Validation failed - show errors to user
+            // Validation failed - automatically ask AI to fix the issues
             console.error('❌ Extension validation failed');
             const validationErrorMessage = formatValidationErrors(validationResult);
 
-            // Add validation error message to chat
-            const validationMessage: Message = {
+            console.log('Auto-fixing validation errors by asking AI to regenerate...');
+
+            const fixPrompt = `The extension you generated has validation errors:\n\n${validationErrorMessage}\n\nPlease fix these validation errors and provide the corrected extension code. Make sure to:\n1. Follow the exact file structure required (manifest.json + 4 files)\n2. Fix all the validation errors listed above\n3. Return the complete, valid JSON in the same format as before`;
+
+            // Automatically send fix request
+            const fixRequestMessage: Message = {
               id: (Date.now() + 2).toString(),
-              role: 'assistant',
-              content: `⚠️ Extension validation failed:\n\n${validationErrorMessage}\n\nPlease try regenerating the extension or provide more specific requirements.`,
+              role: 'user',
+              content: fixPrompt,
               timestamp: Date.now(),
             };
 
-            const messagesWithValidation = [...finalMessages, validationMessage];
-            const chatWithValidation = { ...finalChat, messages: messagesWithValidation };
-            setCurrentChat(chatWithValidation);
-            const chatsWithValidation = chats.map((c) =>
-              c.id === currentChat.id ? chatWithValidation : c
+            const messagesWithFix = [...finalMessages, fixRequestMessage];
+            const chatWithFix = { ...finalChat, messages: messagesWithFix };
+            setCurrentChat(chatWithFix);
+            const chatsWithFix = chats.map((c) =>
+              c.id === currentChat.id ? chatWithFix : c
             );
-            setChats(chatsWithValidation);
-            chrome.storage.local.set({ chats: chatsWithValidation });
+            setChats(chatsWithFix);
+            chrome.storage.local.set({ chats: chatsWithFix });
+
+            // Recursively call sendMessage to get AI to fix it
+            setTimeout(() => {
+              sendMessage(fixPrompt);
+            }, 100);
           }
         }
       } catch (e) {
         console.error('Failed to parse extension data:', e);
 
-        // Add parsing error message to chat
-        const parseErrorMessage: Message = {
+        // Instead of showing error to user, automatically ask AI to fix the JSON
+        console.log('Auto-fixing malformed JSON by asking AI to regenerate...');
+
+        const errorDetails = e instanceof Error ? e.message : 'Invalid JSON format';
+        const fixPrompt = `The JSON you provided has a syntax error: ${errorDetails}\n\nPlease fix the JSON and provide the corrected extension code. Make sure to:\n1. Fix the JSON syntax error\n2. Ensure all strings are properly quoted\n3. Ensure all commas are in the right places\n4. Return the complete, valid JSON in the same format as before`;
+
+        // Automatically send fix request (no user interaction needed)
+        const fixRequestMessage: Message = {
           id: (Date.now() + 3).toString(),
-          role: 'assistant',
-          content: `❌ Failed to parse extension code: ${e instanceof Error ? e.message : 'Invalid JSON format'}\n\nPlease try again or rephrase your request.`,
+          role: 'user',
+          content: fixPrompt,
           timestamp: Date.now(),
         };
 
-        const messagesWithError = [...finalMessages, parseErrorMessage];
-        const chatWithError = { ...finalChat, messages: messagesWithError };
-        setCurrentChat(chatWithError);
-        const chatsWithError = chats.map((c) =>
-          c.id === currentChat.id ? chatWithError : c
+        const messagesWithFix = [...finalMessages, fixRequestMessage];
+        const chatWithFix = { ...finalChat, messages: messagesWithFix };
+        setCurrentChat(chatWithFix);
+        const chatsWithFix = chats.map((c) =>
+          c.id === currentChat.id ? chatWithFix : c
         );
-        setChats(chatsWithError);
-        chrome.storage.local.set({ chats: chatsWithError });
+        setChats(chatsWithFix);
+        chrome.storage.local.set({ chats: chatsWithFix });
+
+        // Recursively call sendMessage to get AI to fix it
+        // Wait a bit to ensure state is updated
+        setTimeout(() => {
+          sendMessage(fixPrompt);
+        }, 100);
       }
     } catch (error) {
       console.error('Error calling OpenAI API:', error);
