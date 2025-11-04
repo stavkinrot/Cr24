@@ -149,8 +149,8 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // GPT-5 only supports temperature of 1
       const effectiveTemperature = settings.model === 'gpt-5' ? 1 : settings.temperature;
 
-      // GPT-5 requires organization verification for streaming, so disable it
-      const useStreaming = settings.model !== 'gpt-5';
+      // Disable streaming for all models - use non-streaming mode with progress stages
+      const useStreaming = false;
 
       console.log('Calling OpenAI API with model:', settings.model, useStreaming ? '(streaming enabled)' : '(streaming disabled)');
       console.log('API Key starts with:', settings.apiKey.substring(0, 10) + '...');
