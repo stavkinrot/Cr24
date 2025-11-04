@@ -355,10 +355,11 @@ Make sure:
       };
 
       // GPT-5 uses max_completion_tokens, older models use max_tokens
+      // Set to 8000 tokens to allow complex extensions while still limiting verbosity
       if (settings.model === 'gpt-5') {
-        requestBody.max_completion_tokens = 5000;
+        requestBody.max_completion_tokens = 8000;
       } else {
-        requestBody.max_tokens = 5000;
+        requestBody.max_tokens = 8000;
       }
 
       const response = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -521,7 +522,18 @@ Make sure:
         // Wait for API response
         const data = await response.json();
         console.log('OpenAI response:', data);
-        accumulatedContent = data.choices[0].message.content;
+
+        // Check if response was truncated due to token limit
+        const finishReason = data.choices[0].finish_reason;
+        if (finishReason === 'length') {
+          console.warn('⚠️ Response truncated due to token limit. Consider increasing max_completion_tokens.');
+        }
+
+        accumulatedContent = data.choices[0].message.content || '';
+
+        if (!accumulatedContent) {
+          throw new Error('Empty response from OpenAI API. The model may have hit token limits or encountered an error.');
+        }
 
         // Clear all pending progress intervals
         progressIntervals.forEach(id => clearTimeout(id));
