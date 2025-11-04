@@ -355,11 +355,11 @@ Make sure:
       };
 
       // GPT-5 uses max_completion_tokens, older models use max_tokens
-      // Set to 8000 tokens to allow complex extensions while still limiting verbosity
+      // Set to 20000 tokens to allow very complex extensions (dark mode, DOM manipulation, etc.)
       if (settings.model === 'gpt-5') {
-        requestBody.max_completion_tokens = 8000;
+        requestBody.max_completion_tokens = 20000;
       } else {
-        requestBody.max_tokens = 8000;
+        requestBody.max_tokens = 20000;
       }
 
       const response = await fetch('https://api.openai.com/v1/chat/completions', {
