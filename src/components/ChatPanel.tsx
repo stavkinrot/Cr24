@@ -39,11 +39,11 @@ const ChatPanel: React.FC = () => {
       setLoadingDots('.'.repeat(dotCount));
     }, 400);
 
-    // Change message every 2 seconds
+    // Change message every 7 seconds
     const messageInterval = setInterval(() => {
       messageIndex = (messageIndex + 1) % funnyMessages.length;
       setLoadingMessage(funnyMessages[messageIndex]);
-    }, 2000);
+    }, 7000);
 
     return () => {
       clearInterval(dotInterval);
