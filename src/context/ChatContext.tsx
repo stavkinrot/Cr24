@@ -190,13 +190,6 @@ Write a short, friendly summary (2-3 sentences) describing what the extension do
 }
 \`\`\`
 
-Example response:
-Created a FocusFlow Pomodoro extension that helps you stay productive with customizable work/break intervals...
-
-\`\`\`json
-{ ... }
-\`\`\`
-
 CRITICAL REQUIREMENTS:
 
 1. FILE STRUCTURE (MANDATORY):
