@@ -34,11 +34,15 @@ The application uses React Context for state management with two main providers:
    - Handles settings (API key, model selection, temperature)
    - Stores and retrieves data from Chrome's `chrome.storage.local`
    - Parses AI responses to extract generated extension code (JSON format)
-   - **Streaming Responses**: Uses OpenAI's streaming API for real-time text generation (disabled for GPT-5)
+   - **System Prompt**: Optimized to ~2,500 tokens (reduced from 7,000) for 30-50% faster generation
+   - **Token Usage Tracking**: Estimates prompt tokens and generation time before API call, captures actual usage after
+   - **JavaScript Syntax Validation**: Uses Acorn parser to validate generated JS code before rendering
+   - **Auto-Repair**: Automatically requests AI to fix syntax errors or malformed JSON
+   - **Streaming Responses**: Currently disabled for all models (can be enabled for verified organizations)
    - **Critical GPT-5 Constraints**:
      - Only supports temperature of 1.0 (automatically enforced)
-     - Streaming disabled due to organization verification requirement
-     - Falls back to non-streaming mode for GPT-5 requests
+     - Streaming requires organization verification (photo ID upload to OpenAI)
+     - Falls back to non-streaming mode with progress stages and realistic time estimates
 
 2. **ThemeContext** (`src/context/ThemeContext.tsx`)
    - Manages light/dark mode
@@ -47,29 +51,43 @@ The application uses React Context for state management with two main providers:
 ### OpenAI Integration Flow
 
 1. User sends message via ChatPanel
-2. ChatContext creates placeholder assistant message and displays it immediately
-3. Makes streaming API call to OpenAI (non-streaming for GPT-5)
-4. **Streaming Mode** (GPT-4o, GPT-4o-mini, GPT-3.5-turbo):
-   - Response streams in real-time using Server-Sent Events (SSE)
-   - Each chunk updates the message content immediately
-   - User sees text appear character-by-character
-   - Provides instant feedback and perceived speed improvement
-5. **Non-Streaming Mode** (GPT-5):
-   - Waits for complete response
-   - Updates message once generation completes
-   - Required due to OpenAI organization verification requirement for GPT-5 streaming
-6. System prompt instructs AI to respond with:
-   - A short 2-3 sentence summary
-   - Complete extension code in JSON format within triple backticks
-7. Response parsing:
-   - Summary text is extracted (everything before the JSON code block)
-   - JSON is parsed to extract `manifest` and `files` objects
-   - Files are displayed in FileList component with individual/ZIP download
-8. **Automatic Chat Title**:
-   - After extension is generated, chat title is automatically set to the manifest name
-   - Example: If manifest.name is "Love Calculator", chat becomes "Love Calculator"
-   - ZIP download filename uses this title (sanitized to `love-calculator.zip`)
-   - Falls back to current chat title if manifest name is missing
+2. **Token Estimation** (before API call):
+   - Calculates estimated prompt tokens (~2,500 with optimized prompt)
+   - Estimates completion tokens (~10,000 for typical extensions)
+   - Calculates estimated generation time based on model speed:
+     - GPT-5: ~4m 10s (40 tokens/sec)
+     - GPT-4o: ~2m 5s (80 tokens/sec)
+     - GPT-4o-mini: ~1m 23s (120 tokens/sec)
+   - Logs estimates to console for debugging
+3. ChatContext creates placeholder assistant message with time estimate
+4. Makes API call to OpenAI (currently non-streaming for all models)
+5. **Progress Stages** (non-streaming mode):
+   - Shows animated progress messages with real-time estimates
+   - Updates every few seconds: "Generating... (~4m 10s estimated)"
+   - Provides user feedback during long generation times
+6. **Response Processing**:
+   - Captures actual token usage from API response (prompt, completion, total)
+   - Logs actual usage to console for comparison with estimates
+   - Extracts summary text (before JSON code block)
+   - Parses JSON to extract `manifest` and `files` objects
+7. **Validation Pipeline**:
+   - **JavaScript Syntax Validation** (uses Acorn parser):
+     - Validates popup.js, content.js, background.js for syntax errors
+     - If errors found, automatically requests AI to fix them
+     - Prevents broken extensions from reaching preview
+   - **Structure Validation** (uses extensionValidator):
+     - Validates manifest format and required fields
+     - Validates file structure (exactly 4 files required)
+     - Checks for missing or invalid references
+   - **Auto-Repair Loop**:
+     - If validation fails, system automatically asks AI to fix issues
+     - Maximum attempts to prevent infinite loops
+     - User sees transparent error messages and fix attempts
+8. **Post-Generation**:
+   - Files displayed in FileList component with individual/ZIP download
+   - Extension saved to current chat's `generatedExtension` field
+   - **Automatic Chat Title**: Set to manifest.name field
+   - **ZIP Filename**: Sanitized from chat title (e.g., `love-calculator.zip`)
 9. **Dynamic Preview Sizing**:
    - PreviewPanel extracts actual dimensions from generated extension CSS/HTML
    - Looks for width/height on `body`, `html`, `main`, or `.container` elements
@@ -77,14 +95,22 @@ The application uses React Context for state management with two main providers:
    - Falls back to 400×600px (standard Chrome popup size) if no dimensions found
    - Auto-height extensions default to 600px height to prevent scrollbars
    - Each extension previews at its actual size, not stretched to fill the panel
-10. PreviewPanel renders the extension in an iframe sandbox
+10. PreviewPanel renders the extension in an iframe sandbox with enhanced Chrome API mocks
 
-**Streaming Implementation Details:**
-- Uses `ReadableStream` reader to process SSE chunks
-- Updates React state on every chunk for real-time UI refresh
-- 5-minute timeout for both streaming and non-streaming modes
-- Gracefully handles stream interruptions and errors
-- Final content saved to Chrome storage after completion
+**Streaming vs Non-Streaming:**
+- **Current Mode**: Non-streaming for all models (line 156 in ChatContext.tsx)
+- **Why**: GPT-5 streaming requires organization verification (photo ID to OpenAI)
+- **Can Enable**: Change `useStreaming = true` if organization is verified
+- **Non-Streaming Benefits**:
+  - Works without verification requirements
+  - Shows progress stages with realistic time estimates
+  - Captures actual token usage statistics
+  - 5-minute timeout protection
+- **If Streaming Enabled**:
+  - Uses `ReadableStream` reader to process SSE chunks
+  - Updates React state on every chunk for real-time UI refresh
+  - Character-by-character text appearance
+  - 50%+ faster perceived speed
 
 ### Preview System
 
@@ -227,7 +253,16 @@ The preview uses a sophisticated multi-layer bridge system to enable full Chrome
 - `chrome.tabs.query()` - Gets active tab for script injection
 - `chrome.tabs.sendMessage()` - Sends messages to content scripts (via postMessage bridge)
 - `chrome.scripting.executeScript()` - Injects scripts into active tab (transforms file references to code)
-- `chrome.storage.local.get/set()` - Mock storage operations
+- `chrome.storage.local.get/set()` - **ENHANCED**: Now supports both Promises AND callbacks
+  - ✅ `await chrome.storage.local.get(key)` - Promise-based (modern, recommended)
+  - ✅ `chrome.storage.local.get(key, callback)` - Callback-based (legacy, still supported)
+  - **Critical Fix**: Previously only supported callbacks, causing Pomodoro extension to fail
+- `chrome.storage.onChanged` - **NEW**: Event emitter for reactive storage updates
+  - Fires when `storage.local.set()` is called
+  - Allows content scripts to react to storage changes
+  - Example: `chrome.storage.onChanged.addListener((changes, area) => {...})`
+- `chrome.action.setBadgeText()` - **NEW**: Sets extension icon badge text (no-op in preview, logs to console)
+- `chrome.action.setBadgeBackgroundColor()` - **NEW**: Sets badge background color (no-op in preview, logs to console)
 
 **Content Script Injection Flow:**
 1. When popup opens with content script extension:
@@ -426,6 +461,38 @@ OpenAI API calls have a 180-second (3 minute) timeout using AbortController. Thi
 - Default model: `gpt-5`
 - Available models: GPT-5, GPT-4.1, GPT-4o
 
+## Syntax Validation & Auto-Repair
+
+The system validates generated extension code in two stages before rendering:
+
+### **Stage 1: JavaScript Syntax Validation** (`src/utils/syntaxValidator.ts`)
+- **Parser**: Uses Acorn (lightweight, safe, no eval())
+- **Files Validated**: popup.js, content.js, background.js, service-worker.js
+- **Validation Output**:
+  - Syntax errors with file name, line number, column number, and message
+  - Example: `popup.js (line 42, column 5): Unexpected token '}'`
+- **Integration**: Runs in ChatContext.tsx before structure validation (line 640)
+- **Auto-Repair**: If errors found, automatically requests AI to fix them
+
+### **Stage 2: Extension Structure Validation** (`src/utils/extensionValidator.ts`)
+- **Validates**:
+  - Manifest format and required fields
+  - Exactly 4 files required: popup.html, popup.css, popup.js, content.js
+  - Manifest references match actual files
+  - Version format, name length, permissions validity
+- **Auto-Repair**: If validation fails, system asks AI to regenerate with corrections
+
+### **Auto-Repair Flow**
+1. AI generates extension
+2. System validates JavaScript syntax (Acorn)
+3. If syntax errors → Auto-request fix from AI
+4. System validates structure (extensionValidator)
+5. If structure errors → Auto-request fix from AI
+6. Maximum retry limit prevents infinite loops
+7. User sees transparent error messages in chat
+
+**Result**: Broken extensions rarely reach the preview. Most issues are auto-fixed transparently.
+
 ## Component Hierarchy
 
 ```
@@ -447,7 +514,7 @@ App
 
 3. **Temperature Override**: When modifying API calls, remember GPT-5 temperature must always be 1.0 regardless of user settings.
 
-4. **Streaming Constraints**: GPT-5 cannot use streaming mode due to OpenAI organization verification requirements. The code automatically disables streaming when GPT-5 is selected (line 152 in ChatContext.tsx). Other models use streaming for better UX.
+4. **Streaming Constraints**: Streaming is currently disabled for all models (line 156 in ChatContext.tsx). GPT-5 streaming requires organization verification (photo ID to OpenAI). Can be enabled by changing `useStreaming = true` if organization is verified.
 
 5. **Message Parsing**: The code extracts JSON from triple backtick code blocks. If the AI response format changes, update the regex in ChatContext and ChatPanel.
 
@@ -468,6 +535,10 @@ App
 13. **Chat Title from Manifest**: After an extension is generated, the chat title is automatically set to the extension's manifest.name field. This updates both the sidebar display and ZIP download filename with no extra API calls needed.
 
 14. **Dynamic Preview Dimensions**: The preview iframe automatically extracts and applies the actual dimensions from the generated extension's CSS. It parses width/height from body/html/main/container elements, calculates total size including padding, and displays each extension at its true size rather than a fixed dimension. Known limitation: Sizing may not perfectly match Chrome's rendering in all cases and requires further refinement.
+
+15. **Token Usage & Estimation**: The system estimates generation time before API calls and logs actual token usage after. Console shows prompt tokens (~2,500), estimated completion (~10,000), and realistic time estimates (GPT-5: ~4m, GPT-4o: ~2m). This helps users understand API costs and wait times.
+
+16. **System Prompt Optimization**: The system prompt is optimized to ~2,500 tokens (reduced from ~7,000). This provides 30-50% faster generation times while maintaining output quality. DO NOT bloat the prompt with verbose examples or repetitive instructions.
 
 ## File Generation System
 
