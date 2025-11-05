@@ -6,6 +6,12 @@ export interface Message {
   displayContent?: string; // Summary text to display (excludes code block)
   isGenerating?: boolean; // True when streaming code generation
   progressStage?: number; // Progress stage index for non-streaming models
+  tokenUsage?: {
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+  }; // Token usage stats from OpenAI API
+  estimatedTime?: number; // Estimated generation time in seconds (based on prompt tokens)
 }
 
 export interface Chat {

@@ -156,39 +156,36 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       console.log('Calling OpenAI API with model:', settings.model, useStreaming ? '(streaming enabled)' : '(streaming disabled)');
       console.log('API Key starts with:', settings.apiKey.substring(0, 10) + '...');
 
+      // Estimate token count (rough approximation: 1 token ≈ 4 characters)
+      const estimateTokens = (text: string) => Math.ceil(text.length / 4);
+
+      // Estimate generation time based on model speed (tokens per second)
+      const modelSpeed = {
+        'gpt-5': 40,           // ~40 tokens/sec
+        'gpt-4o': 80,          // ~80 tokens/sec
+        'gpt-4o-mini': 120,    // ~120 tokens/sec
+        'gpt-4-turbo': 60,     // ~60 tokens/sec
+        'gpt-4': 40,           // ~40 tokens/sec
+        'gpt-3.5-turbo': 150   // ~150 tokens/sec
+      };
+
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minute timeout
 
-      const systemPrompt = `You are an expert Chrome extension developer. Generate complete, working, BEAUTIFUL Chrome extension code based on user requirements.
+      const systemPrompt = `You are an expert Chrome extension developer. Generate complete, working Chrome extensions with modern UI.
 
-IMPORTANT: Your response should have TWO parts:
-
-1. A short, friendly summary (2-3 sentences) describing what the extension does
-2. The complete extension code in JSON format
-
-Format your response like this:
-Created a [Extension Name] Chrome extension that [brief description of functionality].
+RESPONSE FORMAT:
+1. Short summary (2-3 sentences)
+2. Complete code in JSON format:
 
 \`\`\`json
 {
-  "manifest": {
-    "manifest_version": 3,
-    "name": "Extension Name",
-    "version": "1.0.0",
-    "description": "...",
-    "action": { "default_popup": "popup.html" },
-    "content_scripts": [
-      {
-        "matches": ["<all_urls>"],
-        "js": ["content.js"]
-      }
-    ]
-  },
+  "manifest": { /* manifest v3 */ },
   "files": {
-    "popup.html": "complete HTML code here",
-    "popup.js": "complete JavaScript code here",
-    "popup.css": "complete CSS code here",
-    "content.js": "complete content script code here"
+    "popup.html": "...",
+    "popup.css": "...",
+    "popup.js": "...",
+    "content.js": "..."
   },
   "type": "popup"
 }
@@ -196,194 +193,83 @@ Created a [Extension Name] Chrome extension that [brief description of functiona
 
 CRITICAL REQUIREMENTS:
 
-1. EXACT FILE STRUCTURE (MANDATORY):
-   ⚠️ IMPORTANT: Every extension has EXACTLY 5 components:
+1. FILE STRUCTURE (MANDATORY):
+   - manifest: Separate field with manifest_version: 3, name, version, description, action, content_scripts
+   - files: EXACTLY 4 files: popup.html, popup.css, popup.js, content.js
+   - ❌ NO additional files (no background.js, icons, etc.)
+   - ❌ NO manifest in "files" object
 
-   **1. manifest** (separate field in JSON response):
-   - Contains manifest.json content
-   - Required fields: manifest_version, name, version, description, action, content_scripts
+2. MANIFEST:
+   - "action": { "default_popup": "popup.html" }
+   - "content_scripts": [{ "matches": ["<all_urls>"], "js": ["content.js"] }]
+   - Use "activeTab" permission for chrome.tabs.sendMessage()
+   - Adjust "matches" based on extension purpose
 
-   **2-5. files** (exactly 4 files in the "files" object):
-   - "popup.html" - The popup interface HTML
-   - "popup.css" - The popup styles (external modular CSS)
-   - "popup.js" - The popup JavaScript logic
-   - "content.js" - Content script that runs on web pages
+3. HTML:
+   - Reference LOCAL files: <link href="popup.css">, <script src="popup.js">
+   - ❌ NO CDN links (no https://, http://, //)
+   - Place <script> at end of <body>
+   - Use semantic HTML5: <header>, <main>, <section>
+   - Add ARIA labels for accessibility
 
-   ❌ DO NOT create additional files in "files" object (no background.js, no icons, no extra scripts)
-   ❌ DO NOT omit any of these 4 files - all MUST be present
-   ❌ DO NOT put manifest.json in the "files" object - it's a separate "manifest" field
-
-2. MANIFEST VALIDATION:
-   - manifest_version MUST be 3
-   - MUST include: name (max 45 chars), version (x.y.z format), description
-   - MUST declare "action": { "default_popup": "popup.html" }
-   - MUST declare "content_scripts": [{ "matches": ["<all_urls>"], "js": ["content.js"] }]
-   - Adjust "matches" pattern based on extension purpose (use specific URLs if needed)
-   - PERMISSIONS: Use "activeTab" permission (NOT "tabs") when popup needs to communicate with content scripts
-     Example: "permissions": ["activeTab"]
-     ⚠️ CRITICAL: "activeTab" is required for chrome.tabs.sendMessage() and chrome.tabs.query()
-     ❌ DO NOT use "tabs" permission - it requires additional host permissions
-
-3. FILE REFERENCES (CRITICAL):
-   - popup.html MUST reference LOCAL files: <link href="popup.css"> and <script src="popup.js">
-   - NO external CDN links (no https://, no http://, no //)
-   - All referenced files MUST be exactly: popup.css, popup.js
-   - content.js MUST be declared in manifest.content_scripts
-
-4. BEAUTIFUL UI DESIGN SYSTEM:
-   Use EXTERNAL MODULAR CSS with design tokens in popup.css:
-
-   /* Design Tokens */
+4. CSS (BEAUTIFUL MODERN UI):
+   Use CSS variables for consistent design:
    :root {
-     --primary-color: #4f46e5;
+     --primary: #4f46e5;
      --primary-hover: #4338ca;
-     --secondary-color: #8b5cf6;
-     --bg-color: #ffffff;
-     --surface-color: #f9fafb;
-     --text-color: #1f2937;
-     --text-secondary: #6b7280;
-     --border-color: #e5e7eb;
-     --border-radius: 8px;
-     --spacing-xs: 4px;
-     --spacing-sm: 8px;
-     --spacing-md: 16px;
-     --spacing-lg: 24px;
-     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
-     --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.1);
-     --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.1);
+     --bg: #ffffff;
+     --surface: #f9fafb;
+     --text: #1f2937;
+     --border: #e5e7eb;
+     --radius: 8px;
+     --shadow: 0 1px 2px rgba(0,0,0,0.05);
    }
+   body { width: 400px; padding: 16px; font-family: -apple-system, sans-serif; }
+   button { background: var(--primary); color: white; border: none; padding: 8px 16px; border-radius: var(--radius); cursor: pointer; transition: 0.2s; }
+   button:hover { background: var(--primary-hover); transform: translateY(-1px); }
 
-   body {
-     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-     margin: 0;
-     padding: var(--spacing-md);
-     background: var(--bg-color);
-     color: var(--text-color);
-     width: 400px; /* Standard popup width */
-   }
-
-   /* Modern Button Style */
-   button {
-     background: var(--primary-color);
-     color: white;
-     border: none;
-     padding: var(--spacing-sm) var(--spacing-md);
-     border-radius: var(--border-radius);
-     cursor: pointer;
-     font-size: 14px;
-     font-weight: 500;
-     transition: all 0.2s;
-     box-shadow: var(--shadow-sm);
-   }
-
-   button:hover {
-     background: var(--primary-hover);
-     box-shadow: var(--shadow-md);
-     transform: translateY(-1px);
-   }
-
-   button:active {
-     transform: translateY(0);
-   }
-
-   /* Modern Input Style */
-   input, textarea, select {
-     width: 100%;
-     padding: var(--spacing-sm);
-     border: 1px solid var(--border-color);
-     border-radius: var(--border-radius);
-     font-size: 14px;
-     transition: border-color 0.2s;
-   }
-
-   input:focus, textarea:focus, select:focus {
-     outline: none;
-     border-color: var(--primary-color);
-     box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1);
-   }
-
-   /* Card Style */
-   .card {
-     background: var(--surface-color);
-     border-radius: var(--border-radius);
-     padding: var(--spacing-md);
-     box-shadow: var(--shadow-sm);
-     margin-bottom: var(--spacing-md);
-   }
-
-5. HTML BEST PRACTICES:
-   - Use semantic HTML5: <header>, <main>, <section>, <article>
-   - Proper heading hierarchy: h1 → h2 → h3
-   - Labels for all form inputs: <label for="id">Label</label>
-   - ARIA labels for accessibility: aria-label, aria-describedby
-   - Use Flexbox/Grid for layouts (NO tables for layout)
-
-6. CODE QUALITY:
-   - Be concise but complete - avoid unnecessary verbosity
-   - Include error handling in JavaScript
-   - Add loading states for async operations
-   - Validate user inputs
-   - Use modern JavaScript (ES6+): const/let, arrow functions, async/await
-   - Add helpful comments for complex logic
-   - SCRIPT PLACEMENT: Place <script src="popup.js"> at END of <body> (before </body>)
-   - This ensures DOM is ready without needing DOMContentLoaded
-   - If you must access DOM elements, either place script at end OR use DOMContentLoaded
-   - Example with script at end: <body>...<script src="popup.js"></script></body>
-
-   CRITICAL - CHROME API USAGE:
-   - ALWAYS use modern Promise-based Chrome APIs (not callbacks):
-     ✅ const result = await chrome.storage.local.get(key);
+5. JAVASCRIPT:
+   - Modern ES6+: const/let, arrow functions, async/await
+   - Promise-based Chrome APIs:
+     ✅ await chrome.storage.local.get(key);
      ✅ await chrome.storage.local.set({ key: value });
-     ❌ chrome.storage.local.get(key, callback); // Avoid callbacks
+     ❌ NO callbacks: chrome.storage.local.get(key, callback);
+   - Use chrome.storage.onChanged for reactive updates
+   - Badge API: chrome.action.setBadgeText({ text: '5' });
+   - Error handling and input validation
 
-   - For reactive updates, use chrome.storage.onChanged:
-     chrome.storage.onChanged.addListener((changes, area) => {
-       if (area === 'local' && changes.myKey) {
-         // React to storage changes
-       }
-     });
-
-   - Badge API (optional, for showing timer/count in extension icon):
-     chrome.action.setBadgeText({ text: '5' });
-     chrome.action.setBadgeBackgroundColor({ color: '#4285f4' });
-
-7. RESPONSIVENESS:
-   - Design for 400px-600px width (standard Chrome popup sizes)
-   - Use flexible layouts that adapt to content
-   - Test with various content lengths
-
-8. CONTENT SCRIPT GUIDELINES:
-   - content.js runs on web pages specified in manifest.content_scripts.matches
-   - Can interact with page DOM, modify elements, listen to events
-   - Has access to chrome.runtime.sendMessage() to communicate with popup
-   - Should be lightweight and non-intrusive
-   - If extension doesn't need to modify web pages, content.js can be minimal (just a comment explaining it's unused)
-   - ⚠️ CRITICAL: chrome.runtime.onMessage.addListener() MUST return true to keep message channel open
-   - Without return true, sendResponse() will fail silently
-   - Example:
+6. CONTENT SCRIPT:
+   - Runs on web pages (manifest.content_scripts.matches)
+   - chrome.runtime.onMessage.addListener MUST return true:
      chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-       // handle message
        sendResponse({ result: 'data' });
-       return true; // REQUIRED - keeps channel open for async responses
+       return true; // REQUIRED for async
      });
+   - If unused, add comment explaining it's for future use
 
-Make sure:
-- The summary is conversational and explains what you built
-- All code is production-ready and follows Chrome extension best practices
-- Include all necessary files (HTML, CSS, JS)
-- Use manifest version 3
-- ALWAYS use local file references (popup.css, popup.js) - NEVER use CDN links`;
+RULES:
+- Production-ready code only
+- Manifest v3 required
+- Local file references only
+- Complete, working extensions`;
+
+      // Calculate estimated prompt tokens
+      const allMessages = [
+        { role: 'system', content: systemPrompt },
+        ...updatedMessages.map((m) => ({ role: m.role, content: m.content }))
+      ];
+      const promptText = allMessages.map(m => m.content).join('\n');
+      const estimatedPromptTokens = estimateTokens(promptText);
+      const estimatedCompletionTokens = settings.model === 'gpt-5' ? 20000 : 16000;
+      const estimatedTimeSeconds = Math.ceil(estimatedCompletionTokens / (modelSpeed[settings.model] || 60));
+
+      console.log(`📊 Estimated prompt tokens: ${estimatedPromptTokens}`);
+      console.log(`⏱️ Estimated generation time: ${Math.floor(estimatedTimeSeconds / 60)}m ${estimatedTimeSeconds % 60}s`);
 
       // Build request body with model-specific token limit parameter
       const requestBody: any = {
         model: settings.model,
-        messages: [
-          {
-            role: 'system',
-            content: systemPrompt,
-          },
-          ...updatedMessages.map((m) => ({ role: m.role, content: m.content })),
-        ],
+        messages: allMessages,
         temperature: effectiveTemperature,
         stream: useStreaming,
       };
@@ -534,12 +420,19 @@ Make sure:
           const dots = '.'.repeat((dotCount % (maxDots + 1)));
           dotCount++;
 
+          const estimatedMinutes = Math.floor(estimatedTimeSeconds / 60);
+          const estimatedSeconds = estimatedTimeSeconds % 60;
+          const timeDisplay = estimatedMinutes > 0
+            ? `~${estimatedMinutes}m ${estimatedSeconds}s`
+            : `~${estimatedSeconds}s`;
+
           const updatedAssistantMessage: Message = {
             ...assistantMessage,
             content: '',
-            displayContent: `${stage.messageBase}${dots}`,
+            displayContent: `${stage.messageBase}${dots} (${timeDisplay} estimated)`,
             isGenerating: true,
             progressStage: index,
+            estimatedTime: estimatedTimeSeconds,
           };
 
           const updatedMessages = messagesWithAssistant.map(m =>
@@ -585,6 +478,20 @@ Make sure:
         const data = await response.json();
         console.log('OpenAI response:', data);
 
+        // Extract token usage from API response
+        const tokenUsage = data.usage ? {
+          promptTokens: data.usage.prompt_tokens,
+          completionTokens: data.usage.completion_tokens,
+          totalTokens: data.usage.total_tokens
+        } : undefined;
+
+        if (tokenUsage) {
+          console.log(`📊 Actual token usage:`);
+          console.log(`   Prompt: ${tokenUsage.promptTokens} tokens`);
+          console.log(`   Completion: ${tokenUsage.completionTokens} tokens`);
+          console.log(`   Total: ${tokenUsage.totalTokens} tokens`);
+        }
+
         // Check if response was truncated due to token limit
         const finishReason = data.choices[0].finish_reason;
         if (finishReason === 'length') {
@@ -615,6 +522,7 @@ Make sure:
           content: accumulatedContent,
           displayContent: displayContent,
           isGenerating: summaryEndIndex !== -1, // Show progress indicator while we parse
+          tokenUsage,
         };
 
         const updatedMessages = messagesWithAssistant.map(m =>
