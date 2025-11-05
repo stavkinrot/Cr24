@@ -150,7 +150,9 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // GPT-5 only supports temperature of 1
       const effectiveTemperature = settings.model === 'gpt-5' ? 1 : settings.temperature;
 
-      // Disable streaming for all models - use non-streaming mode with progress stages
+      // GPT-5 streaming requires organization verification (photo ID upload)
+      // If you have a verified org, change this to: const useStreaming = true;
+      // For now, disable streaming for all models to show progress stages
       const useStreaming = false;
 
       console.log('Calling OpenAI API with model:', settings.model, useStreaming ? '(streaming enabled)' : '(streaming disabled)');
@@ -259,7 +261,8 @@ RULES:
       ];
       const promptText = allMessages.map(m => m.content).join('\n');
       const estimatedPromptTokens = estimateTokens(promptText);
-      const estimatedCompletionTokens = settings.model === 'gpt-5' ? 20000 : 16000;
+      // Realistic completion tokens for extensions: ~8,000-10,000 (not max limit)
+      const estimatedCompletionTokens = 10000;
       const estimatedTimeSeconds = Math.ceil(estimatedCompletionTokens / (modelSpeed[settings.model] || 60));
 
       console.log(`📊 Estimated prompt tokens: ${estimatedPromptTokens}`);
