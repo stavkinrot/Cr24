@@ -614,19 +614,56 @@ ${html}
             });
           }
 
+          // Storage change listeners for chrome.storage.onChanged
+          const storageChangeListeners = [];
+
           // Create Chrome API that bridges to parent
           window.chrome = {
             storage: {
               local: {
                 get: function(keys, callback) {
-                  callParentChromeAPI('storage.local', 'get', [keys])
-                    .then(result => callback && callback(result))
-                    .catch(err => console.error('storage.local.get error:', err));
+                  const promise = callParentChromeAPI('storage.local', 'get', [keys]);
+                  if (callback) {
+                    promise
+                      .then(result => callback(result))
+                      .catch(err => console.error('storage.local.get error:', err));
+                  }
+                  return promise; // Support Promise-based API
                 },
                 set: function(items, callback) {
-                  callParentChromeAPI('storage.local', 'set', [items])
-                    .then(() => callback && callback())
-                    .catch(err => console.error('storage.local.set error:', err));
+                  const promise = callParentChromeAPI('storage.local', 'set', [items])
+                    .then(() => {
+                      // Emit storage change events
+                      const changes = {};
+                      for (const key in items) {
+                        changes[key] = { newValue: items[key] };
+                      }
+                      storageChangeListeners.forEach(listener => {
+                        try {
+                          listener(changes, 'local');
+                        } catch (e) {
+                          console.error('storage.onChanged listener error:', e);
+                        }
+                      });
+                    });
+                  if (callback) {
+                    promise
+                      .then(() => callback())
+                      .catch(err => console.error('storage.local.set error:', err));
+                  }
+                  return promise; // Support Promise-based API
+                }
+              },
+              onChanged: {
+                addListener: function(callback) {
+                  storageChangeListeners.push(callback);
+                  console.log('[Preview] storage.onChanged listener registered');
+                },
+                removeListener: function(callback) {
+                  const index = storageChangeListeners.indexOf(callback);
+                  if (index > -1) {
+                    storageChangeListeners.splice(index, 1);
+                  }
                 }
               }
             },
@@ -672,6 +709,19 @@ ${html}
                   if (callback) callback();
                   throw err;
                 }
+              }
+            },
+            action: {
+              setBadgeText: function(details, callback) {
+                console.log('[Preview] Badge text:', details.text);
+                // Future: Could display badge visually in preview UI
+                if (callback) callback();
+                return Promise.resolve();
+              },
+              setBadgeBackgroundColor: function(details, callback) {
+                console.log('[Preview] Badge color:', details.color);
+                if (callback) callback();
+                return Promise.resolve();
               }
             }
           };

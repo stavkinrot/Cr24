@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { Chat, Message, Settings, GeneratedExtension } from '../types';
 import { validateExtension, formatValidationErrors } from '../utils/extensionValidator';
+import { validateExtensionJavaScript, formatSyntaxErrors } from '../utils/syntaxValidator';
 
 interface ChatContextType {
   currentChat: Chat | null;
@@ -329,6 +330,23 @@ CRITICAL REQUIREMENTS:
    - If you must access DOM elements, either place script at end OR use DOMContentLoaded
    - Example with script at end: <body>...<script src="popup.js"></script></body>
 
+   CRITICAL - CHROME API USAGE:
+   - ALWAYS use modern Promise-based Chrome APIs (not callbacks):
+     ✅ const result = await chrome.storage.local.get(key);
+     ✅ await chrome.storage.local.set({ key: value });
+     ❌ chrome.storage.local.get(key, callback); // Avoid callbacks
+
+   - For reactive updates, use chrome.storage.onChanged:
+     chrome.storage.onChanged.addListener((changes, area) => {
+       if (area === 'local' && changes.myKey) {
+         // React to storage changes
+       }
+     });
+
+   - Badge API (optional, for showing timer/count in extension icon):
+     chrome.action.setBadgeText({ text: '5' });
+     chrome.action.setBadgeBackgroundColor({ color: '#4285f4' });
+
 7. RESPONSIVENESS:
    - Design for 400px-600px width (standard Chrome popup sizes)
    - Use flexible layouts that adapt to content
@@ -635,8 +653,47 @@ Make sure:
         if (jsonMatch) {
           const extensionData = JSON.parse(jsonMatch[1] || jsonMatch[0]);
 
-          // Validate extension
-          console.log('Validating generated extension...');
+          // Validate JavaScript syntax first
+          console.log('Validating JavaScript syntax...');
+          const syntaxResult = validateExtensionJavaScript(extensionData.files || {});
+
+          if (!syntaxResult.valid) {
+            console.error('❌ JavaScript syntax errors found');
+            const syntaxErrorMessage = formatSyntaxErrors(syntaxResult.errors);
+
+            console.log('Auto-fixing syntax errors by asking AI to regenerate...');
+
+            const fixPrompt = `The extension code you generated has JavaScript syntax errors:\n\n${syntaxErrorMessage}\n\nPlease fix these syntax errors and provide the corrected extension code. Make sure to:\n1. Fix all the syntax errors listed above\n2. Validate that all JavaScript code is syntactically correct\n3. Return the complete, valid extension in the same JSON format as before`;
+
+            // Automatically send fix request
+            const fixRequestMessage: Message = {
+              id: (Date.now() + 2).toString(),
+              role: 'user',
+              content: fixPrompt,
+              timestamp: Date.now(),
+            };
+
+            const messagesWithFix = [...finalMessages, fixRequestMessage];
+            const chatWithFix = { ...finalChat, messages: messagesWithFix };
+            setCurrentChat(chatWithFix);
+            const chatsWithFix = chats.map((c) =>
+              c.id === currentChat.id ? chatWithFix : c
+            );
+            setChats(chatsWithFix);
+            chrome.storage.local.set({ chats: chatsWithFix });
+
+            // Recursively call sendMessage to get AI to fix it
+            setTimeout(() => {
+              sendMessage(fixPrompt);
+            }, 100);
+
+            return; // Stop processing, wait for AI to fix
+          }
+
+          console.log('✅ JavaScript syntax validation passed!');
+
+          // Validate extension structure
+          console.log('Validating extension structure...');
           const validationResult = validateExtension(extensionData);
 
           // Log validation results
