@@ -175,8 +175,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const systemPrompt = `You are an expert Chrome extension developer. Generate complete, working Chrome extensions with modern UI.
 
 RESPONSE FORMAT:
-1. Short summary (2-3 sentences)
-2. Complete code in JSON format:
+Write a short, friendly summary (2-3 sentences) describing what the extension does, then provide the complete code in JSON format:
 
 \`\`\`json
 {
@@ -189,6 +188,13 @@ RESPONSE FORMAT:
   },
   "type": "popup"
 }
+\`\`\`
+
+Example response:
+Created a FocusFlow Pomodoro extension that helps you stay productive with customizable work/break intervals...
+
+\`\`\`json
+{ ... }
 \`\`\`
 
 CRITICAL REQUIREMENTS:
