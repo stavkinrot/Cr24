@@ -76,10 +76,11 @@ function validateManifest(manifest: any): ValidationError[] {
 }
 
 /**
- * Validates that EXACTLY the required files exist - no more, no less
+ * Validates that required files exist and optional files are allowed
  *
- * Extension structure: manifest.json (validated separately) + 4 files
- * Required files in "files" object: content.js, popup.html, popup.css, popup.js
+ * Extension structure: manifest.json (validated separately) + 4-5 files
+ * Required files: content.js, popup.html, popup.css, popup.js
+ * Optional files: background.js, service_worker.js
  */
 function validateFiles(files: Record<string, string>): ValidationError[] {
   const errors: ValidationError[] = [];
@@ -93,37 +94,55 @@ function validateFiles(files: Record<string, string>): ValidationError[] {
     return errors;
   }
 
-  // EXACT required files - no more, no less (manifest.json is separate)
+  // Required files (must exist)
   const requiredFiles = ['content.js', 'popup.html', 'popup.css', 'popup.js'];
+  // Optional files (allowed but not required)
+  const optionalFiles = ['background.js', 'service_worker.js'];
+  const allowedFiles = [...requiredFiles, ...optionalFiles];
   const actualFiles = Object.keys(files);
 
-  // Check for missing files
+  // Check for missing required files
   for (const requiredFile of requiredFiles) {
     if (!files[requiredFile]) {
       errors.push({
         field: 'files',
-        message: `Required file "${requiredFile}" is missing. All extensions must have exactly 4 files: content.js, popup.html, popup.css, popup.js (plus manifest.json which is separate)`,
+        message: `Required file "${requiredFile}" is missing. All extensions must have these 4 files: content.js, popup.html, popup.css, popup.js (plus manifest.json which is separate)`,
         severity: 'error',
       });
     }
   }
 
-  // Check for extra files (not allowed)
+  // Check for extra files (not in allowed list)
   for (const actualFile of actualFiles) {
-    if (!requiredFiles.includes(actualFile)) {
+    if (!allowedFiles.includes(actualFile)) {
       errors.push({
         field: 'files',
-        message: `Unexpected file "${actualFile}" found. Extensions must have ONLY 4 files: content.js, popup.html, popup.css, popup.js (no background.js, no icons, no additional files). manifest.json is separate.`,
+        message: `Unexpected file "${actualFile}" found. Allowed files: content.js, popup.html, popup.css, popup.js, background.js (optional), service_worker.js (optional). manifest.json is separate.`,
         severity: 'error',
       });
     }
   }
 
-  // Check exact count
-  if (actualFiles.length !== requiredFiles.length) {
+  // Validate file count (4 required + up to 1 optional background script)
+  if (actualFiles.length < requiredFiles.length) {
     errors.push({
       field: 'files',
-      message: `Expected exactly ${requiredFiles.length} files, but found ${actualFiles.length}. Required: content.js, popup.html, popup.css, popup.js (manifest.json is validated separately)`,
+      message: `Not enough files. Required: ${requiredFiles.length} files (content.js, popup.html, popup.css, popup.js), got ${actualFiles.length}`,
+      severity: 'error',
+    });
+  } else if (actualFiles.length > requiredFiles.length + 1) {
+    errors.push({
+      field: 'files',
+      message: `Too many files. Expected ${requiredFiles.length} required files + max 1 optional background script, got ${actualFiles.length}`,
+      severity: 'error',
+    });
+  }
+
+  // Ensure only ONE background script type is used (not both)
+  if (files['background.js'] && files['service_worker.js']) {
+    errors.push({
+      field: 'files',
+      message: 'Cannot have both background.js and service_worker.js. Use only one.',
       severity: 'error',
     });
   }
@@ -274,6 +293,61 @@ function validateContentScriptContract(manifest: any): ValidationError[] {
 }
 
 /**
+ * Validates background script contract
+ * If background.js or service_worker.js exists, ensure it's properly declared in manifest
+ */
+function validateBackgroundScriptContract(manifest: any, files: Record<string, string>): ValidationError[] {
+  const errors: ValidationError[] = [];
+
+  const hasBackgroundFile = files['background.js'] || files['service_worker.js'];
+  const backgroundFileName = files['background.js'] ? 'background.js' : 'service_worker.js';
+
+  if (hasBackgroundFile) {
+    // Manifest v3 requires "background.service_worker" field
+    const backgroundConfig = manifest?.background;
+
+    if (!backgroundConfig) {
+      errors.push({
+        field: 'manifest.background',
+        message: `${backgroundFileName} exists but manifest.background is not declared`,
+        severity: 'error',
+      });
+      return errors;
+    }
+
+    // Check for service_worker field (Manifest v3)
+    if (!backgroundConfig.service_worker) {
+      errors.push({
+        field: 'manifest.background',
+        message: `manifest.background must have "service_worker" field pointing to "${backgroundFileName}" (Manifest v3 syntax)`,
+        severity: 'error',
+      });
+    } else {
+      // Validate that service_worker points to the correct file
+      const declaredFile = backgroundConfig.service_worker;
+      if (declaredFile !== backgroundFileName) {
+        errors.push({
+          field: 'manifest.background',
+          message: `manifest.background.service_worker points to "${declaredFile}" but file is named "${backgroundFileName}"`,
+          severity: 'error',
+        });
+      }
+    }
+
+    // Warn if using deprecated Manifest v2 syntax
+    if (backgroundConfig.scripts || backgroundConfig.page) {
+      errors.push({
+        field: 'manifest.background',
+        message: 'Using deprecated Manifest v2 syntax ("scripts" or "page"). Use "service_worker" for Manifest v3',
+        severity: 'warning',
+      });
+    }
+  }
+
+  return errors;
+}
+
+/**
  * Validates icon declarations and formats
  */
 function validateIcons(manifest: any, files: Record<string, string>): ValidationError[] {
@@ -351,7 +425,7 @@ export function validateExtension(extensionData: GeneratedExtension): Validation
   // Validate manifest
   allErrors.push(...validateManifest(extensionData.manifest));
 
-  // Validate files exist (exact 4 files required)
+  // Validate files exist (4 required + optional background script)
   allErrors.push(...validateFiles(extensionData.files));
 
   // Validate popup contract if popup.html exists
@@ -361,6 +435,9 @@ export function validateExtension(extensionData: GeneratedExtension): Validation
 
   // Validate content script contract
   allErrors.push(...validateContentScriptContract(extensionData.manifest));
+
+  // Validate background script contract if background script exists
+  allErrors.push(...validateBackgroundScriptContract(extensionData.manifest, extensionData.files));
 
   // Validate icons
   allErrors.push(...validateIcons(extensionData.manifest, extensionData.files));

@@ -181,7 +181,8 @@ Write a short, friendly summary (2-3 sentences) describing what the extension do
     "popup.html": "...",
     "popup.css": "...",
     "popup.js": "...",
-    "content.js": "..."
+    "content.js": "...",
+    "background.js": "..." // OPTIONAL
   },
   "type": "popup"
 }
@@ -189,17 +190,22 @@ Write a short, friendly summary (2-3 sentences) describing what the extension do
 
 CRITICAL REQUIREMENTS:
 
-1. FILE STRUCTURE (MANDATORY):
+1. FILE STRUCTURE:
    - manifest: Separate field with manifest_version: 3, name, version, description, action, content_scripts
-   - files: EXACTLY 4 files: popup.html, popup.css, popup.js, content.js
-   - ❌ NO additional files (no background.js, icons, etc.)
+   - files: 4 REQUIRED files: popup.html, popup.css, popup.js, content.js
+   - OPTIONAL: background.js (for persistent tasks, alarms, event listeners)
    - ❌ NO manifest in "files" object
+   - ❌ NO icons, images, or other assets
 
 2. MANIFEST:
    - "action": { "default_popup": "popup.html" }
    - "content_scripts": [{ "matches": ["<all_urls>"], "js": ["content.js"] }]
-   - Use "activeTab" permission for chrome.tabs.sendMessage()
-   - Adjust "matches" based on extension purpose
+   - Adjust "matches" based on extension purpose (e.g., ["*://*.github.com/*"])
+   - Permissions: "activeTab", "storage" (always), + others as needed:
+     • "notifications" - for chrome.notifications
+     • "contextMenus" - for right-click menus
+     • "downloads" - for chrome.downloads
+   - Background script (if used): "background": { "service_worker": "background.js" }
 
 3. HTML:
    - Reference LOCAL files: <link href="popup.css">, <script src="popup.js">
@@ -224,7 +230,7 @@ CRITICAL REQUIREMENTS:
    button { background: var(--primary); color: white; border: none; padding: 8px 16px; border-radius: var(--radius); cursor: pointer; transition: 0.2s; }
    button:hover { background: var(--primary-hover); transform: translateY(-1px); }
 
-5. JAVASCRIPT:
+5. JAVASCRIPT (popup.js / content.js):
    - Modern ES6+: const/let, arrow functions, async/await
    - Promise-based Chrome APIs:
      ✅ await chrome.storage.local.get(key);
@@ -232,9 +238,40 @@ CRITICAL REQUIREMENTS:
      ❌ NO callbacks: chrome.storage.local.get(key, callback);
    - Use chrome.storage.onChanged for reactive updates
    - Badge API: chrome.action.setBadgeText({ text: '5' });
+   - Notifications: chrome.notifications.create({ type: 'basic', title: '...', message: '...' });
+   - Downloads: chrome.downloads.download({ url: '...', filename: '...' });
    - Error handling and input validation
 
-6. CONTENT SCRIPT:
+6. BACKGROUND SCRIPT (background.js - OPTIONAL):
+   Use ONLY when extension needs:
+   - Persistent tasks across popup closes
+   - chrome.alarms for scheduled/recurring tasks
+   - Event listeners: chrome.runtime.onInstalled, chrome.tabs.onUpdated, etc.
+   - Background data processing or sync
+
+   Example structure:
+   \`\`\`javascript
+   // Listen for extension installation
+   chrome.runtime.onInstalled.addListener(() => {
+     console.log('Extension installed');
+   });
+
+   // Set up alarms
+   chrome.alarms.create('myAlarm', { periodInMinutes: 60 });
+   chrome.alarms.onAlarm.addListener((alarm) => {
+     // Do something periodically
+   });
+
+   // Communicate with popup
+   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+     if (msg.action === 'getData') {
+       sendResponse({ data: '...' });
+     }
+     return true;
+   });
+   \`\`\`
+
+7. CONTENT SCRIPT:
    - Runs on web pages (manifest.content_scripts.matches)
    - chrome.runtime.onMessage.addListener MUST return true:
      chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
@@ -247,7 +284,8 @@ RULES:
 - Production-ready code only
 - Manifest v3 required
 - Local file references only
-- Complete, working extensions`;
+- Complete, working extensions
+- Use background.js ONLY when needed (timers, alarms, persistent tasks)`;
 
       // Calculate estimated prompt tokens
       const allMessages = [

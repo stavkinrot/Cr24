@@ -72,13 +72,14 @@ The application uses React Context for state management with two main providers:
    - Parses JSON to extract `manifest` and `files` objects
 7. **Validation Pipeline**:
    - **JavaScript Syntax Validation** (uses Acorn parser):
-     - Validates popup.js, content.js, background.js for syntax errors
+     - Validates popup.js, content.js, background.js, service_worker.js for syntax errors
      - If errors found, automatically requests AI to fix them
      - Prevents broken extensions from reaching preview
    - **Structure Validation** (uses extensionValidator):
      - Validates manifest format and required fields
-     - Validates file structure (exactly 4 files required)
+     - Validates file structure (4 required files + optional background script)
      - Checks for missing or invalid references
+     - Validates background script manifest entries if background.js exists
    - **Auto-Repair Loop**:
      - If validation fails, system automatically asks AI to fix issues
      - Maximum attempts to prevent infinite loops
@@ -542,13 +543,38 @@ App
 
 ## File Generation System
 
-Generated extensions are expected to include:
-- `manifest.json`: Manifest v3 format
-- `popup.html`, `popup.css`, `popup.js`: For popup extensions
-- `content.js`: For content script extensions
-- Any additional files specified by the AI
+Generated extensions can include:
+- **Required files (4)**:
+  - `manifest.json`: Manifest v3 format
+  - `popup.html`, `popup.css`, `popup.js`: For popup UI
+  - `content.js`: For content script extensions
+- **Optional files (1)**:
+  - `background.js` or `service_worker.js`: For persistent tasks, alarms, event listeners
 
-The system doesn't validate the generated code - it trusts the AI output and makes it downloadable.
+The system validates all generated code through:
+1. **JavaScript Syntax Validation** (Acorn parser) - validates popup.js, content.js, background.js
+2. **Structure Validation** (extensionValidator) - ensures manifest format, file structure, and references are correct
+3. **Auto-Repair** - automatically requests AI to fix validation errors
+
+### Supported Extension Types
+
+**Phase 1 Capabilities (Current)**:
+- ✅ **Popup extensions** with interactive UI
+- ✅ **Content script extensions** that modify web pages
+- ✅ **Background/Service Worker extensions** with persistent tasks
+- ✅ **Hybrid extensions** (popup + content script + background script)
+
+**Supported Chrome APIs**:
+- `chrome.storage` (local storage, onChanged events)
+- `chrome.tabs` (query, sendMessage)
+- `chrome.scripting` (executeScript)
+- `chrome.action` (setBadgeText, setBadgeBackgroundColor)
+- `chrome.notifications` (create, clear, getAll) - **NEW in Phase 1**
+- `chrome.contextMenus` (create, update, remove, removeAll) - **NEW in Phase 1**
+- `chrome.downloads` (download, search, pause, resume, cancel) - **NEW in Phase 1**
+- `chrome.alarms` (create, get, getAll, clear, clearAll) - **NEW in Phase 1**
+
+All APIs are fully bridged through the postMessage system, working seamlessly in the preview sandbox.
 
 ## Git Workflow
 

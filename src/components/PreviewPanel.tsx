@@ -261,6 +261,73 @@ const PreviewPanel: React.FC = () => {
               chrome.storage.local.set(args[0], () => resolve());
             });
             result = {};
+          } else if (api === 'notifications' && method === 'create') {
+            // Chrome Notifications API
+            // Handle both (id, options) and (options) signatures
+            if (typeof args[0] === 'string') {
+              // (id, options) signature
+              result = await chrome.notifications.create(args[0], args[1]);
+            } else {
+              // (options) signature
+              result = await chrome.notifications.create(args[0]);
+            }
+            console.log('Notification created:', result);
+          } else if (api === 'notifications' && method === 'clear') {
+            result = await chrome.notifications.clear(args[0]);
+          } else if (api === 'notifications' && method === 'getAll') {
+            result = await new Promise(resolve => {
+              chrome.notifications.getAll(resolve);
+            });
+          } else if (api === 'contextMenus' && method === 'create') {
+            // Chrome Context Menus API
+            const menuItem = args[0];
+            result = chrome.contextMenus.create(menuItem);
+            console.log('Context menu created:', result);
+          } else if (api === 'contextMenus' && method === 'update') {
+            await chrome.contextMenus.update(args[0], args[1]);
+            result = {};
+          } else if (api === 'contextMenus' && method === 'remove') {
+            await chrome.contextMenus.remove(args[0]);
+            result = {};
+          } else if (api === 'contextMenus' && method === 'removeAll') {
+            await chrome.contextMenus.removeAll();
+            result = {};
+          } else if (api === 'downloads' && method === 'download') {
+            // Chrome Downloads API
+            result = await chrome.downloads.download(args[0]);
+            console.log('Download started:', result);
+          } else if (api === 'downloads' && method === 'search') {
+            result = await chrome.downloads.search(args[0]);
+          } else if (api === 'downloads' && method === 'pause') {
+            await chrome.downloads.pause(args[0]);
+            result = {};
+          } else if (api === 'downloads' && method === 'resume') {
+            await chrome.downloads.resume(args[0]);
+            result = {};
+          } else if (api === 'downloads' && method === 'cancel') {
+            await chrome.downloads.cancel(args[0]);
+            result = {};
+          } else if (api === 'alarms' && method === 'create') {
+            // Chrome Alarms API (for background scripts)
+            // Handle both (name, alarmInfo) and (alarmInfo) signatures
+            if (typeof args[0] === 'string') {
+              // (name, alarmInfo) signature
+              await chrome.alarms.create(args[0], args[1]);
+              console.log('Alarm created:', args[0]);
+            } else {
+              // (alarmInfo) signature - creates unnamed alarm
+              await chrome.alarms.create(args[0]);
+              console.log('Unnamed alarm created');
+            }
+            result = {};
+          } else if (api === 'alarms' && method === 'get') {
+            result = await chrome.alarms.get(args[0]);
+          } else if (api === 'alarms' && method === 'getAll') {
+            result = await chrome.alarms.getAll();
+          } else if (api === 'alarms' && method === 'clear') {
+            result = await chrome.alarms.clear(args[0]);
+          } else if (api === 'alarms' && method === 'clearAll') {
+            result = await chrome.alarms.clearAll();
           }
 
           // Send result back to sandbox
@@ -722,6 +789,190 @@ ${html}
                 console.log('[Preview] Badge color:', details.color);
                 if (callback) callback();
                 return Promise.resolve();
+              }
+            },
+            notifications: {
+              create: async function(arg1, arg2, callback) {
+                // Handle both signatures: (id, options, callback) and (options, callback)
+                const notificationId = typeof arg1 === 'string' ? arg1 : undefined;
+                const options = typeof arg1 === 'string' ? arg2 : arg1;
+                const cb = typeof arg2 === 'function' ? arg2 : callback;
+
+                try {
+                  const result = await callParentChromeAPI('notifications', 'create', [notificationId, options]);
+                  if (cb) cb(result);
+                  return result;
+                } catch (err) {
+                  console.error('notifications.create error:', err);
+                  if (cb) cb();
+                }
+              },
+              clear: async function(notificationId, callback) {
+                try {
+                  const result = await callParentChromeAPI('notifications', 'clear', [notificationId]);
+                  if (callback) callback(result);
+                  return result;
+                } catch (err) {
+                  console.error('notifications.clear error:', err);
+                  if (callback) callback(false);
+                }
+              },
+              getAll: async function(callback) {
+                try {
+                  const result = await callParentChromeAPI('notifications', 'getAll', []);
+                  if (callback) callback(result);
+                  return result;
+                } catch (err) {
+                  console.error('notifications.getAll error:', err);
+                  if (callback) callback({});
+                }
+              }
+            },
+            contextMenus: {
+              create: function(createProperties, callback) {
+                try {
+                  const result = callParentChromeAPI('contextMenus', 'create', [createProperties]);
+                  if (callback) {
+                    result.then(() => callback()).catch(err => {
+                      console.error('contextMenus.create error:', err);
+                      callback();
+                    });
+                  }
+                  return result;
+                } catch (err) {
+                  console.error('contextMenus.create error:', err);
+                  if (callback) callback();
+                }
+              },
+              update: async function(id, updateProperties, callback) {
+                try {
+                  await callParentChromeAPI('contextMenus', 'update', [id, updateProperties]);
+                  if (callback) callback();
+                } catch (err) {
+                  console.error('contextMenus.update error:', err);
+                  if (callback) callback();
+                }
+              },
+              remove: async function(menuItemId, callback) {
+                try {
+                  await callParentChromeAPI('contextMenus', 'remove', [menuItemId]);
+                  if (callback) callback();
+                } catch (err) {
+                  console.error('contextMenus.remove error:', err);
+                  if (callback) callback();
+                }
+              },
+              removeAll: async function(callback) {
+                try {
+                  await callParentChromeAPI('contextMenus', 'removeAll', []);
+                  if (callback) callback();
+                } catch (err) {
+                  console.error('contextMenus.removeAll error:', err);
+                  if (callback) callback();
+                }
+              }
+            },
+            downloads: {
+              download: async function(options, callback) {
+                try {
+                  const result = await callParentChromeAPI('downloads', 'download', [options]);
+                  if (callback) callback(result);
+                  return result;
+                } catch (err) {
+                  console.error('downloads.download error:', err);
+                  if (callback) callback();
+                }
+              },
+              search: async function(query, callback) {
+                try {
+                  const result = await callParentChromeAPI('downloads', 'search', [query]);
+                  if (callback) callback(result);
+                  return result;
+                } catch (err) {
+                  console.error('downloads.search error:', err);
+                  if (callback) callback([]);
+                }
+              },
+              pause: async function(downloadId, callback) {
+                try {
+                  await callParentChromeAPI('downloads', 'pause', [downloadId]);
+                  if (callback) callback();
+                } catch (err) {
+                  console.error('downloads.pause error:', err);
+                  if (callback) callback();
+                }
+              },
+              resume: async function(downloadId, callback) {
+                try {
+                  await callParentChromeAPI('downloads', 'resume', [downloadId]);
+                  if (callback) callback();
+                } catch (err) {
+                  console.error('downloads.resume error:', err);
+                  if (callback) callback();
+                }
+              },
+              cancel: async function(downloadId, callback) {
+                try {
+                  await callParentChromeAPI('downloads', 'cancel', [downloadId]);
+                  if (callback) callback();
+                } catch (err) {
+                  console.error('downloads.cancel error:', err);
+                  if (callback) callback();
+                }
+              }
+            },
+            alarms: {
+              create: function(nameOrAlarmInfo, alarmInfo) {
+                const name = typeof nameOrAlarmInfo === 'string' ? nameOrAlarmInfo : undefined;
+                const info = typeof nameOrAlarmInfo === 'string' ? alarmInfo : nameOrAlarmInfo;
+                callParentChromeAPI('alarms', 'create', [name, info])
+                  .catch(err => console.error('alarms.create error:', err));
+              },
+              get: async function(name, callback) {
+                try {
+                  const result = await callParentChromeAPI('alarms', 'get', [name]);
+                  if (callback) callback(result);
+                  return result;
+                } catch (err) {
+                  console.error('alarms.get error:', err);
+                  if (callback) callback();
+                }
+              },
+              getAll: async function(callback) {
+                try {
+                  const result = await callParentChromeAPI('alarms', 'getAll', []);
+                  if (callback) callback(result);
+                  return result;
+                } catch (err) {
+                  console.error('alarms.getAll error:', err);
+                  if (callback) callback([]);
+                }
+              },
+              clear: async function(name, callback) {
+                try {
+                  const result = await callParentChromeAPI('alarms', 'clear', [name]);
+                  if (callback) callback(result);
+                  return result;
+                } catch (err) {
+                  console.error('alarms.clear error:', err);
+                  if (callback) callback(false);
+                }
+              },
+              clearAll: async function(callback) {
+                try {
+                  const result = await callParentChromeAPI('alarms', 'clearAll', []);
+                  if (callback) callback(result);
+                  return result;
+                } catch (err) {
+                  console.error('alarms.clearAll error:', err);
+                  if (callback) callback(false);
+                }
+              },
+              onAlarm: {
+                addListener: function(callback) {
+                  console.log('[Preview] alarms.onAlarm listener registered (not functional in preview)');
+                  // Note: Alarm events cannot be fully simulated in preview
+                }
               }
             }
           };

@@ -15,7 +15,11 @@
   "permissions": [
     "storage",
     "activeTab",
-    "scripting"
+    "scripting",
+    "notifications",
+    "contextMenus",
+    "downloads",
+    "alarms"
   ],
   "host_permissions": [
     "https://api.openai.com/*"
