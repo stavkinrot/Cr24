@@ -145,17 +145,12 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const chatWithAssistant = { ...updatedChat, messages: messagesWithAssistant };
     setCurrentChat(chatWithAssistant);
 
-    // Call OpenAI API with streaming (disabled for GPT-5 due to organization verification requirement)
+    // Call OpenAI API
     try {
       // GPT-5 only supports temperature of 1
       const effectiveTemperature = settings.model === 'gpt-5' ? 1 : settings.temperature;
 
-      // GPT-5 streaming requires organization verification (photo ID upload)
-      // If you have a verified org, change this to: const useStreaming = true;
-      // For now, disable streaming for all models to show progress stages
-      const useStreaming = false;
-
-      console.log('Calling OpenAI API with model:', settings.model, useStreaming ? '(streaming enabled)' : '(streaming disabled)');
+      console.log('Calling OpenAI API with model:', settings.model);
       console.log('API Key starts with:', settings.apiKey.substring(0, 10) + '...');
 
       // Estimate token count (rough approximation: 1 token ≈ 4 characters)
@@ -273,7 +268,7 @@ RULES:
         model: settings.model,
         messages: allMessages,
         temperature: effectiveTemperature,
-        stream: useStreaming,
+        stream: false,
       };
 
       // Set model-specific token limits based on each model's maximum
@@ -309,222 +304,52 @@ RULES:
       }
 
       let accumulatedContent = '';
-      let isGeneratingCode = false; // Track if we've entered the code block
 
-      if (useStreaming) {
-        // Process streaming response
-        const reader = response.body?.getReader();
-        const decoder = new TextDecoder();
+      // Show progress stages with dynamic, fun messages like Claude Code
+      const funnyMessages = [
+        'Thinking', 'Pondering', 'Analyzing', 'Brainstorming', 'Contemplating',
+        'Ideating', 'Architecting', 'Designing', 'Blueprinting', 'Sketching',
+        'Crafting', 'Building', 'Constructing', 'Assembling', 'Weaving',
+        'Coding', 'Typing', 'Scripting', 'Programming', 'Compiling',
+        'Generating', 'Creating', 'Manifesting', 'Conjuring', 'Materializing',
+        'Polishing', 'Refining', 'Optimizing', 'Perfecting', 'Fine-tuning',
+        'Seasoning', 'Marinating', 'Simmering', 'Baking', 'Sautéing',
+        'Mixing', 'Blending', 'Whisking', 'Kneading', 'Folding',
+        'Emulsifying', 'Caramelizing', 'Glazing', 'Garnishing', 'Plating'
+      ];
 
-        if (!reader) {
-          throw new Error('Response body reader not available');
-        }
+      const progressStages = [
+        { delay: 0, messageBase: funnyMessages[Math.floor(Math.random() * 5)], percent: 10 },
+        { delay: 8000, messageBase: funnyMessages[5 + Math.floor(Math.random() * 5)], percent: 20 },
+        { delay: 16000, messageBase: funnyMessages[10 + Math.floor(Math.random() * 5)], percent: 30 },
+        { delay: 24000, messageBase: funnyMessages[15 + Math.floor(Math.random() * 5)], percent: 40 },
+        { delay: 32000, messageBase: funnyMessages[20 + Math.floor(Math.random() * 5)], percent: 50 },
+        { delay: 40000, messageBase: funnyMessages[25 + Math.floor(Math.random() * 5)], percent: 60 },
+        { delay: 48000, messageBase: funnyMessages[30 + Math.floor(Math.random() * 5)], percent: 70 },
+        { delay: 56000, messageBase: funnyMessages[35 + Math.floor(Math.random() * 5)], percent: 80 },
+        { delay: 64000, messageBase: funnyMessages[40 + Math.floor(Math.random() * 5)], percent: 90 },
+      ];
 
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
+      // Helper function to update progress stage with dynamic dots
+      let dotCount = 0;
+      const maxDots = 3;
+      const updateProgressStage = (stage: { messageBase: string }, index: number) => {
+        const dots = '.'.repeat((dotCount % (maxDots + 1)));
+        dotCount++;
 
-          const chunk = decoder.decode(value, { stream: true });
-          const lines = chunk.split('\n').filter(line => line.trim() !== '');
+        const estimatedMinutes = Math.floor(estimatedTimeSeconds / 60);
+        const estimatedSeconds = estimatedTimeSeconds % 60;
+        const timeDisplay = estimatedMinutes > 0
+          ? `~${estimatedMinutes}m ${estimatedSeconds}s`
+          : `~${estimatedSeconds}s`;
 
-          for (const line of lines) {
-            if (line.startsWith('data: ')) {
-              const data = line.slice(6);
-
-              if (data === '[DONE]') {
-                console.log('Stream completed');
-                break;
-              }
-
-              try {
-                const parsed = JSON.parse(data);
-                const delta = parsed.choices[0]?.delta?.content;
-
-                if (delta) {
-                  accumulatedContent += delta;
-
-                  // Check if we've hit the code block marker
-                  if (accumulatedContent.includes('```json')) {
-                    isGeneratingCode = true;
-                  }
-
-                  // Extract summary (everything before ```json)
-                  const summaryEndIndex = accumulatedContent.indexOf('```json');
-                  const displayContent = summaryEndIndex !== -1
-                    ? accumulatedContent.substring(0, summaryEndIndex).trim()
-                    : accumulatedContent;
-
-                  // Update the assistant message in real-time with ONLY summary text
-                  const updatedAssistantMessage: Message = {
-                    ...assistantMessage,
-                    content: accumulatedContent, // Store full content
-                    displayContent: displayContent, // But only display summary
-                    isGenerating: isGeneratingCode, // Flag for UI to show progress indicator
-                  };
-
-                  const updatedMessages = messagesWithAssistant.map(m =>
-                    m.id === assistantMessageId ? updatedAssistantMessage : m
-                  );
-
-                  const updatedChat = {
-                    ...chatWithAssistant,
-                    messages: updatedMessages,
-                    updatedAt: Date.now(),
-                  };
-
-                  setCurrentChat(updatedChat);
-
-                  // Update chats array
-                  const updatedChatsArray = chats.map((c) =>
-                    c.id === currentChat.id ? updatedChat : c
-                  );
-                  setChats(updatedChatsArray);
-                }
-              } catch (e) {
-                console.error('Error parsing stream chunk:', e);
-              }
-            }
-          }
-        }
-
-        console.log('Final accumulated content length:', accumulatedContent.length);
-      } else {
-        // Non-streaming response (for GPT-5)
-        // Show progress stages with dynamic, fun messages like Claude Code
-        const funnyMessages = [
-          'Thinking', 'Pondering', 'Analyzing', 'Brainstorming', 'Contemplating',
-          'Ideating', 'Architecting', 'Designing', 'Blueprinting', 'Sketching',
-          'Crafting', 'Building', 'Constructing', 'Assembling', 'Weaving',
-          'Coding', 'Typing', 'Scripting', 'Programming', 'Compiling',
-          'Generating', 'Creating', 'Manifesting', 'Conjuring', 'Materializing',
-          'Polishing', 'Refining', 'Optimizing', 'Perfecting', 'Fine-tuning',
-          'Seasoning', 'Marinating', 'Simmering', 'Baking', 'Sautéing',
-          'Mixing', 'Blending', 'Whisking', 'Kneading', 'Folding',
-          'Emulsifying', 'Caramelizing', 'Glazing', 'Garnishing', 'Plating'
-        ];
-
-        const progressStages = [
-          { delay: 0, messageBase: funnyMessages[Math.floor(Math.random() * 5)], percent: 10 },
-          { delay: 8000, messageBase: funnyMessages[5 + Math.floor(Math.random() * 5)], percent: 20 },
-          { delay: 16000, messageBase: funnyMessages[10 + Math.floor(Math.random() * 5)], percent: 30 },
-          { delay: 24000, messageBase: funnyMessages[15 + Math.floor(Math.random() * 5)], percent: 40 },
-          { delay: 32000, messageBase: funnyMessages[20 + Math.floor(Math.random() * 5)], percent: 50 },
-          { delay: 40000, messageBase: funnyMessages[25 + Math.floor(Math.random() * 5)], percent: 60 },
-          { delay: 48000, messageBase: funnyMessages[30 + Math.floor(Math.random() * 5)], percent: 70 },
-          { delay: 56000, messageBase: funnyMessages[35 + Math.floor(Math.random() * 5)], percent: 80 },
-          { delay: 64000, messageBase: funnyMessages[40 + Math.floor(Math.random() * 5)], percent: 90 },
-        ];
-
-        // Helper function to update progress stage with dynamic dots
-        let dotCount = 0;
-        const maxDots = 3;
-        const updateProgressStage = (stage: { messageBase: string }, index: number) => {
-          const dots = '.'.repeat((dotCount % (maxDots + 1)));
-          dotCount++;
-
-          const estimatedMinutes = Math.floor(estimatedTimeSeconds / 60);
-          const estimatedSeconds = estimatedTimeSeconds % 60;
-          const timeDisplay = estimatedMinutes > 0
-            ? `~${estimatedMinutes}m ${estimatedSeconds}s`
-            : `~${estimatedSeconds}s`;
-
-          const updatedAssistantMessage: Message = {
-            ...assistantMessage,
-            content: '',
-            displayContent: `${stage.messageBase}${dots} (${timeDisplay} estimated)`,
-            isGenerating: true,
-            progressStage: index,
-            estimatedTime: estimatedTimeSeconds,
-          };
-
-          const updatedMessages = messagesWithAssistant.map(m =>
-            m.id === assistantMessageId ? updatedAssistantMessage : m
-          );
-
-          const updatedChat = {
-            ...chatWithAssistant,
-            messages: updatedMessages,
-            updatedAt: Date.now(),
-          };
-
-          setCurrentChat(updatedChat);
-
-          // Also update chats array for persistence
-          const updatedChatsArray = chats.map((c) =>
-            c.id === currentChat.id ? updatedChat : c
-          );
-          setChats(updatedChatsArray);
-        };
-
-        // Show first stage immediately
-        let currentStageIndex = 0;
-        updateProgressStage(progressStages[0], 0);
-
-        // Animate dots every 400ms for current stage
-        const dotAnimationInterval = window.setInterval(() => {
-          updateProgressStage(progressStages[currentStageIndex], currentStageIndex);
-        }, 400);
-
-        // Start progress stage updates for remaining stages
-        const progressIntervals: number[] = [dotAnimationInterval];
-        progressStages.slice(1).forEach((stage, index) => {
-          const timeoutId = window.setTimeout(() => {
-            currentStageIndex = index + 1;
-            updateProgressStage(stage, index + 1);
-          }, stage.delay);
-
-          progressIntervals.push(timeoutId);
-        });
-
-        // Wait for API response
-        const data = await response.json();
-        console.log('OpenAI response:', data);
-
-        // Extract token usage from API response
-        const tokenUsage = data.usage ? {
-          promptTokens: data.usage.prompt_tokens,
-          completionTokens: data.usage.completion_tokens,
-          totalTokens: data.usage.total_tokens
-        } : undefined;
-
-        if (tokenUsage) {
-          console.log(`📊 Actual token usage:`);
-          console.log(`   Prompt: ${tokenUsage.promptTokens} tokens`);
-          console.log(`   Completion: ${tokenUsage.completionTokens} tokens`);
-          console.log(`   Total: ${tokenUsage.totalTokens} tokens`);
-        }
-
-        // Check if response was truncated due to token limit
-        const finishReason = data.choices[0].finish_reason;
-        if (finishReason === 'length') {
-          console.warn('⚠️ Response truncated due to token limit. Consider increasing max_completion_tokens.');
-        }
-
-        accumulatedContent = data.choices[0].message.content || '';
-
-        if (!accumulatedContent) {
-          throw new Error('Empty response from OpenAI API. The model may have hit token limits or encountered an error.');
-        }
-
-        // Clear all pending progress intervals and the dot animation interval
-        progressIntervals.forEach(id => {
-          clearTimeout(id);
-          clearInterval(id); // Also clear in case it's the dot animation interval
-        });
-
-        // Extract summary for non-streaming too
-        const summaryEndIndex = accumulatedContent.indexOf('```json');
-        const displayContent = summaryEndIndex !== -1
-          ? accumulatedContent.substring(0, summaryEndIndex).trim()
-          : accumulatedContent;
-
-        // Update the assistant message with complete content
         const updatedAssistantMessage: Message = {
           ...assistantMessage,
-          content: accumulatedContent,
-          displayContent: displayContent,
-          isGenerating: summaryEndIndex !== -1, // Show progress indicator while we parse
-          tokenUsage,
+          content: '',
+          displayContent: `${stage.messageBase}${dots} (${timeDisplay} estimated)`,
+          isGenerating: true,
+          progressStage: index,
+          estimatedTime: estimatedTimeSeconds,
         };
 
         const updatedMessages = messagesWithAssistant.map(m =>
@@ -538,20 +363,84 @@ RULES:
         };
 
         setCurrentChat(updatedChat);
+
+        // Also update chats array for persistence
+        const updatedChatsArray = chats.map((c) =>
+          c.id === currentChat.id ? updatedChat : c
+        );
+        setChats(updatedChatsArray);
+      };
+
+      // Show first stage immediately
+      let currentStageIndex = 0;
+      updateProgressStage(progressStages[0], 0);
+
+      // Animate dots every 400ms for current stage
+      const dotAnimationInterval = window.setInterval(() => {
+        updateProgressStage(progressStages[currentStageIndex], currentStageIndex);
+      }, 400);
+
+      // Start progress stage updates for remaining stages
+      const progressIntervals: number[] = [dotAnimationInterval];
+      progressStages.slice(1).forEach((stage, index) => {
+        const timeoutId = window.setTimeout(() => {
+          currentStageIndex = index + 1;
+          updateProgressStage(stage, index + 1);
+        }, stage.delay);
+
+        progressIntervals.push(timeoutId);
+      });
+
+      // Wait for API response
+      const data = await response.json();
+      console.log('OpenAI response:', data);
+
+      // Extract token usage from API response
+      const tokenUsage = data.usage ? {
+        promptTokens: data.usage.prompt_tokens,
+        completionTokens: data.usage.completion_tokens,
+        totalTokens: data.usage.total_tokens
+      } : undefined;
+
+      if (tokenUsage) {
+        console.log(`📊 Actual token usage:`);
+        console.log(`   Prompt: ${tokenUsage.promptTokens} tokens`);
+        console.log(`   Completion: ${tokenUsage.completionTokens} tokens`);
+        console.log(`   Total: ${tokenUsage.totalTokens} tokens`);
       }
 
-      // Save final state to storage (clear isGenerating flag)
+      // Check if response was truncated due to token limit
+      const finishReason = data.choices[0].finish_reason;
+      if (finishReason === 'length') {
+        console.warn('⚠️ Response truncated due to token limit. Consider increasing max_completion_tokens.');
+      }
+
+      accumulatedContent = data.choices[0].message.content || '';
+
+      if (!accumulatedContent) {
+        throw new Error('Empty response from OpenAI API. The model may have hit token limits or encountered an error.');
+      }
+
+      // Clear all pending progress intervals and the dot animation interval
+      progressIntervals.forEach(id => {
+        clearTimeout(id);
+        clearInterval(id); // Also clear in case it's the dot animation interval
+      });
+
+      // Extract summary and save final state to storage
       const summaryEndIndex = accumulatedContent.indexOf('```json');
       const finalDisplayContent = summaryEndIndex !== -1
         ? accumulatedContent.substring(0, summaryEndIndex).trim()
         : accumulatedContent;
 
+      // Update the assistant message with complete content (clear isGenerating flag)
       const finalMessages = messagesWithAssistant.map(m =>
         m.id === assistantMessageId
-          ? { ...m, content: accumulatedContent, displayContent: finalDisplayContent, isGenerating: false }
+          ? { ...m, content: accumulatedContent, displayContent: finalDisplayContent, isGenerating: false, tokenUsage }
           : m
       );
       const finalChat = { ...chatWithAssistant, messages: finalMessages };
+      setCurrentChat(finalChat);
       const finalChats = chats.map((c) => (c.id === currentChat.id ? finalChat : c));
       setChats(finalChats);
       chrome.storage.local.set({ chats: finalChats });
