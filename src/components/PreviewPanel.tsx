@@ -117,18 +117,19 @@ const PreviewPanel: React.FC = () => {
 
               const combinedCode = fileContents.join('\n\n');
 
-              // Wrap content script with Chrome API mock for message receiving
+              // Wrap content script with Chrome API mock for message receiving AND sending
               const wrappedCode = `
 (function() {
-  // Set up chrome.runtime.onMessage for content scripts
+  // COMPLETELY override chrome.runtime for content scripts (don't preserve real API)
+  // Content scripts should use our mock, not the real Cr24 extension's Chrome API
   if (!window.chrome) {
     window.chrome = {};
   }
-  if (!window.chrome.runtime) {
-    window.chrome.runtime = {};
-  }
 
-  // Create message listener system
+  // Force override chrome.runtime completely
+  window.chrome.runtime = {};
+
+  // Create message listener system (for receiving messages FROM popup/background)
   const messageListeners = [];
 
   window.chrome.runtime.onMessage = {
@@ -138,20 +139,45 @@ const PreviewPanel: React.FC = () => {
     }
   };
 
-  // Listen for messages from the extension
+  // sendMessage: Send messages TO background script
+  // For content script → background communication, this is a preview limitation
+  // In installed extensions, this works via real Chrome API
+  window.chrome.runtime.sendMessage = function(message, callback) {
+    console.log('[Content Script] sendMessage to background not supported in preview (works when installed)');
+
+    // Return empty response for preview
+    const promise = Promise.resolve({});
+
+    if (callback) {
+      promise.then(callback);
+    }
+
+    return promise;
+  };
+
+  // Listen for messages from the popup (via postMessage bridge)
   window.addEventListener('message', function(event) {
     // Only accept messages from same origin with our marker
     if (event.source !== window || !event.data || event.data.source !== 'crx-generator-popup') {
       return;
     }
 
-    console.log('[Content Script] Received message:', event.data);
+    console.log('[Content Script] Received message from popup:', event.data);
     const message = event.data.message;
 
     // Call all registered listeners
+    // Track if any listener sent a response
+    let responseSent = false;
+
     messageListeners.forEach(listener => {
+      if (responseSent) return; // Only use first response
+
       try {
-        listener(message, {}, function(response) {
+        const returnValue = listener(message, {}, function(response) {
+          // Only send first response
+          if (responseSent) return;
+          responseSent = true;
+
           // Send response back
           console.log('[Content Script] Sending response:', response);
           window.postMessage({
@@ -160,13 +186,18 @@ const PreviewPanel: React.FC = () => {
             response: response
           }, '*');
         });
+
+        // If listener returned true, it means async response is coming
+        if (returnValue === true) {
+          // Wait for sendResponse to be called
+        }
       } catch (err) {
         console.error('[Content Script] Error in message listener:', err);
       }
     });
   });
 
-  console.log('[Content Script] Chrome API mock initialized');
+  console.log('[Content Script] Chrome API mock initialized (with sendMessage support)');
 
   // Execute the actual content script
   ${combinedCode}
@@ -357,9 +388,63 @@ const PreviewPanel: React.FC = () => {
     return () => window.removeEventListener('message', handleMessage);
   }, []);
 
+  // Listen for content script → background messages via chrome.runtime.onMessage
+  useEffect(() => {
+    const handleContentScriptMessage = (request: any, _sender: chrome.runtime.MessageSender, sendResponse: (response?: any) => void) => {
+      // Check if message is from our generated extension's content script
+      if (request && request._crxGeneratorMessage) {
+        const message = request.message;
+        console.log('[PreviewPanel] Received message from content script via chrome.runtime:', message);
+
+        // Forward message to sandbox iframe's background script
+        if (iframeRef.current?.contentWindow) {
+          const messageId = 'cs_' + Date.now() + '_' + Math.random();
+
+          // Send message to sandbox
+          iframeRef.current.contentWindow.postMessage({
+            type: 'CONTENT_TO_BACKGROUND',
+            messageId,
+            message
+          }, '*');
+
+          // Set up listener for response from sandbox
+          const responseHandler = (event: MessageEvent) => {
+            if (event.data && event.data.type === 'BACKGROUND_TO_CONTENT' && event.data.messageId === messageId) {
+              window.removeEventListener('message', responseHandler);
+              console.log('[PreviewPanel] Received response from background:', event.data.response);
+              sendResponse(event.data.response);
+            }
+          };
+
+          window.addEventListener('message', responseHandler);
+
+          // Timeout after 5 seconds
+          setTimeout(() => {
+            window.removeEventListener('message', responseHandler);
+            sendResponse({});
+          }, 5000);
+        } else {
+          sendResponse({});
+        }
+
+        return true; // Keep message channel open for async response
+      }
+    };
+
+    chrome.runtime.onMessage.addListener(handleContentScriptMessage);
+    return () => chrome.runtime.onMessage.removeListener(handleContentScriptMessage);
+  }, []);
+
+  // Track which tabs have content scripts injected to prevent duplicate injections
+  const injectedTabsRef = React.useRef<Set<number>>(new Set());
+
   useEffect(() => {
     console.log('PreviewPanel: generatedExtension changed', generatedExtension);
     generatedExtensionRef.current = generatedExtension;
+
+    // Clear injected tabs tracker when extension changes (new extension = re-inject)
+    injectedTabsRef.current.clear();
+
     if (generatedExtension && iframeRef.current) {
       // Inject content scripts into active tab if they exist
       injectContentScripts();
@@ -388,12 +473,19 @@ const PreviewPanel: React.FC = () => {
         return;
       }
 
+      // Check if already injected into this tab
+      if (injectedTabsRef.current.has(tab.id)) {
+        console.log('Content script already injected into tab:', tab.id);
+        return;
+      }
+
       console.log('Injecting content script into active tab:', tab.id);
+      injectedTabsRef.current.add(tab.id);
 
       // Wrap content script with Chrome API mock (same as in executeScript handler)
       const wrappedCode = `
 (function() {
-  // Set up chrome.runtime.onMessage for content scripts
+  // Set up chrome.runtime for content scripts
   if (!window.chrome) {
     window.chrome = {};
   }
@@ -401,7 +493,10 @@ const PreviewPanel: React.FC = () => {
     window.chrome.runtime = {};
   }
 
-  // Create message listener system
+  // Store reference to REAL Chrome API before we override it
+  const realChromeRuntimeSendMessage = window.chrome?.runtime?.sendMessage;
+
+  // Create message listener system (for receiving messages FROM popup/background)
   const messageListeners = [];
 
   window.chrome.runtime.onMessage = {
@@ -411,20 +506,66 @@ const PreviewPanel: React.FC = () => {
     }
   };
 
-  // Listen for messages from the extension
+  // sendMessage: Send messages TO background script
+  // Content scripts use a special marker so PreviewPanel can intercept via chrome.runtime.onMessage
+  window.chrome.runtime.sendMessage = function(message, callback) {
+    console.log('[Content Script] sendMessage called, using real Chrome API to reach Cr24 extension:', message);
+
+    // Wrap message with marker so PreviewPanel knows it's from generated extension
+    const wrappedMessage = {
+      _crxGeneratorMessage: true,
+      message: message
+    };
+
+    // Use REAL chrome.runtime.sendMessage (saved before override) to send to Cr24 extension
+    const promise = new Promise((resolve) => {
+      try {
+        if (realChromeRuntimeSendMessage) {
+          // This sends to Cr24 Extension Generator's runtime.onMessage listener
+          realChromeRuntimeSendMessage(wrappedMessage, (response) => {
+            console.log('[Content Script] Received response from Cr24 extension:', response);
+            resolve(response || {});
+          });
+        } else {
+          console.error('[Content Script] Real chrome.runtime.sendMessage not available');
+          resolve({});
+        }
+      } catch (err) {
+        console.error('[Content Script] Error sending message:', err);
+        resolve({});
+      }
+    });
+
+    if (callback) {
+      promise.then(callback);
+    }
+
+    return promise;
+  };
+
+  // Listen for messages from the popup (via postMessage bridge)
   window.addEventListener('message', function(event) {
     // Only accept messages from same origin with our marker
     if (event.source !== window || !event.data || event.data.source !== 'crx-generator-popup') {
       return;
     }
 
-    console.log('[Content Script] Received message:', event.data);
+    console.log('[Content Script] Received message from popup:', event.data);
     const message = event.data.message;
 
     // Call all registered listeners
+    // Track if any listener sent a response
+    let responseSent = false;
+
     messageListeners.forEach(listener => {
+      if (responseSent) return; // Only use first response
+
       try {
-        listener(message, {}, function(response) {
+        const returnValue = listener(message, {}, function(response) {
+          // Only send first response
+          if (responseSent) return;
+          responseSent = true;
+
           // Send response back
           console.log('[Content Script] Sending response:', response);
           window.postMessage({
@@ -433,13 +574,18 @@ const PreviewPanel: React.FC = () => {
             response: response
           }, '*');
         });
+
+        // If listener returned true, it means async response is coming
+        if (returnValue === true) {
+          // Wait for sendResponse to be called
+        }
       } catch (err) {
         console.error('[Content Script] Error in message listener:', err);
       }
     });
   });
 
-  console.log('[Content Script] Chrome API mock initialized');
+  console.log('[Content Script] Chrome API mock initialized (with sendMessage support)');
 
   // Execute the actual content script
   ${contentScriptFile}
@@ -1026,6 +1172,62 @@ ${html}
               }
             }
           };
+
+          // Listen for content script → background messages from parent
+          window.addEventListener('message', async function(event) {
+            if (event.data && event.data.type === 'CONTENT_TO_BACKGROUND') {
+              console.log('[Sandbox] Received message from content script:', event.data.message);
+              const { messageId, message } = event.data;
+
+              try {
+                // Get registered background listeners
+                const listeners = window.__backgroundMessageListeners || [];
+
+                if (listeners.length === 0) {
+                  console.warn('[Sandbox] No background message listeners registered');
+                  window.parent.postMessage({
+                    type: 'BACKGROUND_TO_CONTENT',
+                    messageId,
+                    response: {}
+                  }, '*');
+                  return;
+                }
+
+                // Call all listeners (mimic Chrome's behavior)
+                let response = {};
+                for (const listener of listeners) {
+                  try {
+                    const result = await new Promise((resolve) => {
+                      const sendResponse = (resp) => resolve(resp);
+                      const returnValue = listener(message, { tab: { id: 1 } }, sendResponse);
+                      // If listener doesn't return true, it means it's sync
+                      if (returnValue !== true) {
+                        resolve({});
+                      }
+                    });
+                    response = result;
+                  } catch (e) {
+                    console.error('[Sandbox] Background listener error:', e);
+                  }
+                }
+
+                // Send response back to parent
+                console.log('[Sandbox] Sending response back to content script:', response);
+                window.parent.postMessage({
+                  type: 'BACKGROUND_TO_CONTENT',
+                  messageId,
+                  response
+                }, '*');
+              } catch (error) {
+                console.error('[Sandbox] Error handling content script message:', error);
+                window.parent.postMessage({
+                  type: 'BACKGROUND_TO_CONTENT',
+                  messageId,
+                  response: {}
+                }, '*');
+              }
+            }
+          });
 
           console.log('Chrome API bridge ready');
         </script>
