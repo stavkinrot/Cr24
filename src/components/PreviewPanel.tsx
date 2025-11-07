@@ -735,9 +735,54 @@ ${html}
               }
             },
             runtime: {
-              sendMessage: function(message, callback) {
-                console.log('chrome.runtime.sendMessage not bridged yet');
-                if (callback) callback({});
+              sendMessage: async function(message, callback) {
+                console.log('[Preview] chrome.runtime.sendMessage called:', message);
+
+                // Get registered background listeners
+                const listeners = window.__backgroundMessageListeners || [];
+
+                if (listeners.length === 0) {
+                  console.warn('[Preview] No background message listeners registered');
+                  if (callback) callback({});
+                  return Promise.resolve({});
+                }
+
+                // Call all listeners (mimic Chrome's behavior)
+                let response = {};
+                for (const listener of listeners) {
+                  try {
+                    const result = await new Promise((resolve) => {
+                      const sendResponse = (resp) => resolve(resp);
+                      const returnValue = listener(message, {}, sendResponse);
+                      // If listener doesn't return true, it means it's sync
+                      if (returnValue !== true) {
+                        resolve({});
+                      }
+                    });
+                    response = result;
+                  } catch (e) {
+                    console.error('[Preview] Background listener error:', e);
+                    window.chrome.runtime.lastError = { message: e.message };
+                  }
+                }
+
+                if (callback) callback(response);
+                return response;
+              },
+              onMessage: {
+                addListener: function(callback) {
+                  console.log('[Preview] runtime.onMessage.addListener called (popup side)');
+                  // Popup-side listener (not typically used, but support it)
+                  if (!window.__popupMessageListeners) window.__popupMessageListeners = [];
+                  window.__popupMessageListeners.push(callback);
+                }
+              },
+              onInstalled: {
+                addListener: function(callback) {
+                  console.log('[Preview] runtime.onInstalled.addListener called');
+                  // Execute immediately in preview (simulate fresh install)
+                  setTimeout(() => callback({ reason: 'install' }), 0);
+                }
               },
               lastError: null
             },
@@ -995,6 +1040,48 @@ ${html}
           html = html.replace('</head>', `${cssTag}</head>`);
         } else {
           html = cssTag + html;
+        }
+      }
+
+      // Inject background.js FIRST (if exists) - runs before popup.js
+      if (generatedExtension.files['background.js'] || generatedExtension.files['service_worker.js']) {
+        const backgroundScript = generatedExtension.files['background.js'] || generatedExtension.files['service_worker.js'];
+
+        // Wrap background script to register message listeners globally
+        const wrappedBackgroundScript = `
+<script>
+(function() {
+  console.log('[Preview] Executing background script...');
+
+  // Initialize global listener registry
+  window.__backgroundMessageListeners = [];
+
+  // Wrap chrome.runtime.onMessage.addListener to register listeners
+  const originalOnMessage = window.chrome.runtime.onMessage;
+  window.chrome.runtime.onMessage = {
+    addListener: function(callback) {
+      console.log('[Preview] Background script registered message listener');
+      window.__backgroundMessageListeners.push(callback);
+    },
+    removeListener: function(callback) {
+      const index = window.__backgroundMessageListeners.indexOf(callback);
+      if (index > -1) window.__backgroundMessageListeners.splice(index, 1);
+    }
+  };
+
+  // Execute background script
+  ${backgroundScript}
+
+  console.log('[Preview] Background script executed, listeners:', window.__backgroundMessageListeners.length);
+})();
+</script>
+        `;
+
+        // Inject background script in head (executes immediately)
+        if (html.includes('</head>')) {
+          html = html.replace('</head>', `${wrappedBackgroundScript}</head>`);
+        } else {
+          html = wrappedBackgroundScript + html;
         }
       }
 

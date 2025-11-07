@@ -279,6 +279,49 @@ The preview uses a sophisticated multi-layer bridge system to enable full Chrome
    - Waits for response
    - Returns response to popup
 
+#### Layer 3: Background Script Execution Bridge (NEW)
+
+**Problem:** Background scripts (service workers) run persistently in the background context, separate from the popup. In preview, there is no background context.
+
+**Solution: Execute background.js in Same Sandbox Context as Popup**
+
+The preview executes background.js in the same sandbox as popup.js, but BEFORE popup.js loads:
+
+**Background Script Execution** (lines 1046-1086 in PreviewPanel.tsx):
+1. If `background.js` or `service_worker.js` exists, inject it first (before popup.js)
+2. Wrap background script to intercept `chrome.runtime.onMessage.addListener()` calls
+3. Store registered message listeners in `window.__backgroundMessageListeners` array
+4. Execute background script code (runs chrome.runtime.onInstalled immediately)
+5. Background script initializes storage, sets up state, registers message handlers
+
+**Popup ↔ Background Communication** (lines 738-787 in PreviewPanel.tsx):
+- `chrome.runtime.sendMessage()` mock looks up `window.__backgroundMessageListeners`
+- Calls each registered background listener with the message
+- Waits for `sendResponse()` callback or returned Promise
+- Returns response to popup.js
+- **Critical**: Supports both sync and async listeners (return true for async)
+
+**chrome.runtime.onInstalled Simulation**:
+- Fires immediately when background script loads
+- Simulates fresh extension install (`{ reason: 'install' }`)
+- Allows background script to initialize storage defaults
+
+**Execution Order**:
+1. Chrome API mock loads first
+2. background.js executes (registers listeners, initializes storage)
+3. popup.js loads and can immediately communicate with background
+
+**What This Enables**:
+- ✅ **Pomodoro timers** - Background manages timer state, popup shows UI
+- ✅ **State management extensions** - Background holds persistent state
+- ✅ **Extensions with background data processing**
+- ✅ **Timer/alarm-based extensions** - Background listens to `chrome.alarms.onAlarm`
+
+**Limitations**:
+- Background and popup run in **same JavaScript context** (not separate like real extensions)
+- `chrome.alarms` fire but won't persist across popup closes (preview is ephemeral)
+- No true background persistence (preview resets when you switch chats)
+
 **Key Insight:**
 - **Preview popup runs in sandboxed iframe** (isolated, uses postMessage to parent)
 - **Content scripts run on real webpages in MAIN world** (can modify page DOM)
