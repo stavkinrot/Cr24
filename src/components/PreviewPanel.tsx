@@ -264,12 +264,14 @@ const PreviewPanel: React.FC = () => {
           } else if (api === 'notifications' && method === 'create') {
             // Chrome Notifications API
             // Handle both (id, options) and (options) signatures
-            if (typeof args[0] === 'string') {
-              // (id, options) signature
+            if (args.length === 2 && typeof args[0] === 'string') {
+              // (id, options) signature - 2 args, first is string
               result = await chrome.notifications.create(args[0], args[1]);
-            } else {
-              // (options) signature
+            } else if (args.length === 1) {
+              // (options) signature - 1 arg (options object)
               result = await chrome.notifications.create(args[0]);
+            } else {
+              throw new Error('Invalid notifications.create signature');
             }
             console.log('Notification created:', result);
           } else if (api === 'notifications' && method === 'clear') {
@@ -839,12 +841,15 @@ ${html}
             notifications: {
               create: async function(arg1, arg2, callback) {
                 // Handle both signatures: (id, options, callback) and (options, callback)
-                const notificationId = typeof arg1 === 'string' ? arg1 : undefined;
-                const options = typeof arg1 === 'string' ? arg2 : arg1;
+                const isIdProvided = typeof arg1 === 'string';
+                const notificationId = isIdProvided ? arg1 : undefined;
+                const options = isIdProvided ? arg2 : arg1;
                 const cb = typeof arg2 === 'function' ? arg2 : callback;
 
                 try {
-                  const result = await callParentChromeAPI('notifications', 'create', [notificationId, options]);
+                  // Send correct args based on signature
+                  const args = isIdProvided ? [notificationId, options] : [options];
+                  const result = await callParentChromeAPI('notifications', 'create', args);
                   if (cb) cb(result);
                   return result;
                 } catch (err) {
