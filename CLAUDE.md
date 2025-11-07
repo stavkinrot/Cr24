@@ -250,6 +250,19 @@ The preview uses a sophisticated multi-layer bridge system to enable full Chrome
    - Calls callback after Promise resolves
    - Sets `chrome.runtime.lastError` on errors
 
+5. **Duplicate Injection Prevention** (lines 439-479):
+   - Uses `injectedTabsRef` to track which tabs have content scripts
+   - Prevents injecting same content script multiple times into same tab
+   - Critical for preventing response races and incorrect counts
+   - Tracker cleared when extension changes to allow re-injection
+
+6. **Content Script Chrome API Override** (lines 122-151):
+   - **COMPLETELY overrides** `chrome.runtime` in content scripts
+   - Does NOT preserve real Chrome API (prevents conflicts)
+   - Content scripts use pure mock, isolated from Cr24 extension's Chrome API
+   - **Critical**: Prevents real Chrome listeners from interfering with mock responses
+   - **Limitation**: `chrome.runtime.sendMessage()` from content script → background not supported in preview (works when installed)
+
 **Supported APIs via Bridge:**
 - `chrome.tabs.query()` - Gets active tab for script injection
 - `chrome.tabs.sendMessage()` - Sends messages to content scripts (via postMessage bridge)
@@ -618,6 +631,45 @@ The system validates all generated code through:
 - `chrome.alarms` (create, get, getAll, clear, clearAll) - **NEW in Phase 1**
 
 All APIs are fully bridged through the postMessage system, working seamlessly in the preview sandbox.
+
+### Preview Limitations
+
+Some Chrome APIs and features have limitations in the live preview but work correctly when the extension is installed:
+
+**APIs That Don't Work in Preview** (✅ Work when installed):
+1. **Context Menus (`chrome.contextMenus`)**:
+   - **Why**: Context menus require the extension to be installed in Chrome
+   - **Behavior**: API calls succeed but menus don't appear in right-click menu
+   - **Workaround**: Download and install extension to test context menus
+
+2. **Downloads (`chrome.downloads`)**:
+   - **Why**: Sandbox security restrictions prevent download initiation
+   - **Behavior**: `chrome.downloads.download()` fails or doesn't trigger browser download
+   - **Workaround**: Download and install extension to test downloads
+
+3. **Content Script → Background Messaging**:
+   - **Why**: Cross-context communication limitation
+   - **API**: `chrome.runtime.sendMessage()` called FROM content script TO background
+   - **Behavior**: Returns empty response in preview
+   - **What Works**: Popup → Background messaging works fine
+   - **What Works**: Popup → Content Script messaging works fine
+   - **Workaround**: Download and install extension to test content-to-background communication
+
+**APIs That Work in Preview**:
+- ✅ `chrome.storage` (all methods, including onChanged events)
+- ✅ `chrome.tabs.query()` and `chrome.tabs.sendMessage()` (popup → content script)
+- ✅ `chrome.scripting.executeScript()` (file-based and func-based)
+- ✅ `chrome.runtime.sendMessage()` (popup → background)
+- ✅ `chrome.notifications` (create, clear, getAll)
+- ✅ `chrome.action` (setBadgeText, setBadgeBackgroundColor)
+- ✅ `chrome.alarms` (create, get, clear - but won't persist across preview sessions)
+- ✅ Background scripts with timers and state management
+- ✅ Content scripts that modify webpage DOM
+
+**Testing Recommendations**:
+- Use preview for rapid development and testing of most functionality
+- Download and install extension to test: context menus, downloads, content→background messaging
+- Preview works for ~95% of extension functionality
 
 ## Git Workflow
 
