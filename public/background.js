@@ -3,13 +3,56 @@
  * Handles long-running OpenAI API calls that persist when popup closes
  */
 
+// Track active generation requests
+const activeGenerations = new Map();
+
 // Handle OpenAI API calls from popup
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'GENERATE_EXTENSION') {
-    handleGenerateExtension(message.payload)
-      .then(response => sendResponse({ success: true, data: response }))
-      .catch(error => sendResponse({ success: false, error: error.message }));
+    const { chatId, ...payload } = message.payload;
+
+    // Mark generation as in progress
+    activeGenerations.set(chatId, { status: 'generating', startTime: Date.now() });
+
+    handleGenerateExtension(payload, chatId)
+      .then(response => {
+        // Save to storage for popup to retrieve (even if closed)
+        chrome.storage.local.get(['pendingResponses'], (result) => {
+          const pendingResponses = result.pendingResponses || {};
+          pendingResponses[chatId] = {
+            success: true,
+            data: response,
+            timestamp: Date.now()
+          };
+          chrome.storage.local.set({ pendingResponses });
+        });
+
+        activeGenerations.delete(chatId);
+        sendResponse({ success: true, data: response });
+      })
+      .catch(error => {
+        // Save error to storage
+        chrome.storage.local.get(['pendingResponses'], (result) => {
+          const pendingResponses = result.pendingResponses || {};
+          pendingResponses[chatId] = {
+            success: false,
+            error: error.message,
+            timestamp: Date.now()
+          };
+          chrome.storage.local.set({ pendingResponses });
+        });
+
+        activeGenerations.delete(chatId);
+        sendResponse({ success: false, error: error.message });
+      });
     return true; // Keep channel open for async response
+  }
+
+  if (message.type === 'CHECK_GENERATION_STATUS') {
+    const { chatId } = message.payload;
+    const status = activeGenerations.get(chatId);
+    sendResponse({ status: status || null });
+    return true;
   }
 });
 
