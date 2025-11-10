@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { Chat, Message, Settings, GeneratedExtension } from '../types';
+import { Chat, Message, Settings, GeneratedExtension, PageContext } from '../types';
 import { validateExtension, formatValidationErrors } from '../utils/extensionValidator';
 import { validateExtensionJavaScript, formatSyntaxErrors } from '../utils/syntaxValidator';
 
@@ -8,12 +8,14 @@ interface ChatContextType {
   chats: Chat[];
   settings: Settings;
   generatedExtension: GeneratedExtension | null;
+  pageContext: PageContext | null;
   createNewChat: () => void;
   selectChat: (chatId: string) => void;
   deleteChat: (chatId: string) => void;
-  sendMessage: (content: string) => Promise<void>;
+  sendMessage: (content: string, includePageContext?: boolean) => Promise<void>;
   updateSettings: (settings: Partial<Settings>) => void;
   setGeneratedExtension: (extension: GeneratedExtension | null) => void;
+  setPageContext: (context: PageContext | null) => void;
 }
 
 const ChatContext = createContext<ChatContextType | undefined>(undefined);
@@ -27,6 +29,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     temperature: 1.0,
   });
   const [generatedExtension, setGeneratedExtension] = useState<GeneratedExtension | null>(null);
+  const [pageContext, setPageContext] = useState<PageContext | null>(null);
 
   useEffect(() => {
     // Load data from chrome storage
@@ -109,7 +112,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     chrome.storage.local.set({ chats: updatedChats });
   };
 
-  const sendMessage = async (content: string) => {
+  const sendMessage = async (content: string, includePageContext: boolean = false) => {
     if (!currentChat || !settings.apiKey) return;
 
     const userMessage: Message = {
@@ -287,9 +290,49 @@ RULES:
 - Complete, working extensions
 - Use background.js ONLY when needed (timers, alarms, persistent tasks)`;
 
+      // Add page context if enabled
+      let enhancedSystemPrompt = systemPrompt;
+      if (includePageContext && pageContext) {
+        enhancedSystemPrompt += `
+
+🌐 CURRENT WEBPAGE CONTEXT:
+The user is currently on this webpage. Use this information to generate a highly specific, context-aware extension.
+
+URL: ${pageContext.url}
+Title: ${pageContext.title}
+
+Page Structure (first 3000 chars):
+${pageContext.htmlSample}
+
+Key Elements:
+- Headings: ${pageContext.headings.slice(0, 5).join(', ')}${pageContext.headings.length > 5 ? '...' : ''}
+- Total Links: ${pageContext.stats.totalLinks}
+- Total Headings: ${pageContext.stats.totalHeadings}
+- Has Login Form: ${pageContext.stats.hasLoginForm ? 'Yes' : 'No'}
+- Has Search Box: ${pageContext.stats.hasSearchBox ? 'Yes' : 'No'}
+
+Top CSS Classes:
+${pageContext.mainSelectors.topClasses.slice(0, 10).map(c => `  .${c}`).join('\n')}
+
+Top Element IDs:
+${pageContext.mainSelectors.topIds.slice(0, 10).map(id => `  #${id}`).join('\n')}
+
+Page Text Sample (first 500 chars):
+${pageContext.text.substring(0, 500)}...
+
+CONTEXT-AWARE INSTRUCTIONS:
+- Generate selectors that work specifically for THIS page structure
+- Use exact class names and IDs you see in the HTML above
+- Make the extension hyper-targeted to this website (${new URL(pageContext.url).hostname})
+- Set manifest "matches" to specifically target this domain: ["*://*.${new URL(pageContext.url).hostname}/*"]
+- Reference actual elements from the page structure in your code
+- Extract data that's actually present on this page
+`;
+      }
+
       // Calculate estimated prompt tokens
       const allMessages = [
-        { role: 'system', content: systemPrompt },
+        { role: 'system', content: enhancedSystemPrompt },
         ...updatedMessages.map((m) => ({ role: m.role, content: m.content }))
       ];
       const promptText = allMessages.map(m => m.content).join('\n');
@@ -660,12 +703,14 @@ RULES:
         chats,
         settings,
         generatedExtension,
+        pageContext,
         createNewChat,
         selectChat,
         deleteChat,
         sendMessage,
         updateSettings,
         setGeneratedExtension,
+        setPageContext,
       }}
     >
       {children}

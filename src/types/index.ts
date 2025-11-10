@@ -54,3 +54,22 @@ export interface ValidationResult {
   errors: ValidationError[];
   warnings: ValidationError[];
 }
+
+export interface PageContext {
+  url: string;
+  title: string;
+  htmlSample: string;
+  text: string;
+  mainSelectors: {
+    topClasses: string[];
+    topIds: string[];
+  };
+  stats: {
+    totalLinks: number;
+    totalHeadings: number;
+    hasLoginForm: boolean;
+    hasSearchBox: boolean;
+  };
+  headings: string[];
+  favicon?: string;
+}

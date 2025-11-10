@@ -16,13 +16,15 @@
     "storage",
     "activeTab",
     "scripting",
+    "tabs",
     "notifications",
     "contextMenus",
     "downloads",
     "alarms"
   ],
   "host_permissions": [
-    "https://api.openai.com/*"
+    "https://api.openai.com/*",
+    "<all_urls>"
   ],
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'self'",
