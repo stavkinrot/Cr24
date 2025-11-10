@@ -275,13 +275,13 @@
   background-color: var(--bg-secondary);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
-  padding: var(--spacing-sm);
+  padding: 8px var(--spacing-sm);
 }
 
 .page-context-header {
   display: flex;
   align-items: center;
-  gap: var(--spacing-xs);
+  gap: 6px;
 }
 
 .page-favicon {
@@ -337,43 +337,66 @@
 }
 
 .suggested-prompts {
-  margin-top: var(--spacing-sm);
-  padding-top: var(--spacing-sm);
+  margin-top: var(--spacing-xs);
+  padding-top: var(--spacing-xs);
   border-top: 1px solid var(--border-color);
 }
 
 .suggested-prompts-label {
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
   color: var(--text-secondary);
-  margin-bottom: 6px;
+  margin-bottom: 4px;
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
 
 .suggested-prompts-list {
   display: flex;
-  flex-direction: column;
   gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-color) transparent;
+}
+
+.suggested-prompts-list::-webkit-scrollbar {
+  height: 4px;
+}
+
+.suggested-prompts-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.suggested-prompts-list::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 2px;
+}
+
+.suggested-prompts-list::-webkit-scrollbar-thumb:hover {
+  background: var(--text-tertiary);
 }
 
 .suggested-prompt-button {
-  padding: 8px var(--spacing-sm);
+  padding: 6px 10px;
   background-color: var(--bg-primary);
   border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
+  border-radius: 12px;
   color: var(--text-primary);
-  font-size: 12px;
-  text-align: left;
+  font-size: 11px;
+  text-align: center;
   cursor: pointer;
   transition: all var(--transition-base);
-  line-height: 1.4;
+  white-space: nowrap;
+  flex-shrink: 0;
+  line-height: 1.2;
 }
 
 .suggested-prompt-button:hover:not(:disabled) {
   background-color: var(--bg-tertiary);
   border-color: var(--accent-color);
   color: var(--accent-color);
+  transform: translateY(-1px);
 }
 
 .suggested-prompt-button:disabled {
