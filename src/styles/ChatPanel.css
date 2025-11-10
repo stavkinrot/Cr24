@@ -252,36 +252,41 @@
   width: 32px;
   height: 32px;
   border-radius: var(--radius-sm);
-  background-color: var(--bg-secondary);
-  color: var(--text-secondary);
-  font-size: 16px;
+  background-color: transparent;
+  border: none;
   display: flex;
   align-items: center;
   justify-content: center;
   transition: all var(--transition-base);
-  border: 1px solid var(--border-color);
   cursor: pointer;
   flex-shrink: 0;
-  opacity: 0.7;
+  padding: 0;
+}
+
+.context-toggle-button svg {
+  color: var(--text-secondary);
+  transition: all var(--transition-base);
 }
 
 .context-toggle-button:hover:not(:disabled) {
   background-color: var(--bg-tertiary);
-  border-color: var(--accent-color);
-  opacity: 1;
-  transform: scale(1.05);
+}
+
+.context-toggle-button:hover:not(:disabled) svg {
+  color: var(--accent-color);
+  transform: scale(1.1);
 }
 
 .context-toggle-button.active {
-  background-color: var(--accent-color);
-  color: white;
-  border-color: var(--accent-color);
-  opacity: 1;
+  background-color: transparent;
+}
+
+.context-toggle-button.active svg {
+  color: var(--accent-color);
 }
 
 .context-toggle-button.active:hover:not(:disabled) {
-  background-color: var(--primary-hover);
-  transform: scale(1.05);
+  background-color: var(--bg-tertiary);
 }
 
 .context-toggle-button:disabled {
