@@ -243,7 +243,7 @@ const ChatPanel: React.FC = () => {
           title={pageContext ? 'Remove page context' : 'Include current page context'}
           disabled={isLoading}
         >
-          📄
+          🔗
         </button>
         <textarea
           className="chat-input"
