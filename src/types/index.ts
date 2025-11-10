@@ -6,6 +6,12 @@ export interface Message {
   displayContent?: string; // Summary text to display (excludes code block)
   isGenerating?: boolean; // True when streaming code generation
   progressStage?: number; // Progress stage index for non-streaming models
+  tokenUsage?: {
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+  }; // Token usage stats from OpenAI API
+  estimatedTime?: number; // Estimated generation time in seconds (based on prompt tokens)
 }
 
 export interface Chat {
@@ -35,4 +41,35 @@ export interface PreviewState {
   extension: GeneratedExtension | null;
   isLoading: boolean;
   error: string | null;
+}
+
+export interface ValidationError {
+  field: string;
+  message: string;
+  severity: 'error' | 'warning';
+}
+
+export interface ValidationResult {
+  isValid: boolean;
+  errors: ValidationError[];
+  warnings: ValidationError[];
+}
+
+export interface PageContext {
+  url: string;
+  title: string;
+  htmlSample: string;
+  text: string;
+  mainSelectors: {
+    topClasses: string[];
+    topIds: string[];
+  };
+  stats: {
+    totalLinks: number;
+    totalHeadings: number;
+    hasLoginForm: boolean;
+    hasSearchBox: boolean;
+  };
+  headings: string[];
+  favicon?: string;
 }

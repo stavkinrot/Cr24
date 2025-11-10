@@ -1,17 +1,21 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { Chat, Message, Settings, GeneratedExtension } from '../types';
+import { Chat, Message, Settings, GeneratedExtension, PageContext } from '../types';
+import { validateExtension, formatValidationErrors } from '../utils/extensionValidator';
+import { validateExtensionJavaScript, formatSyntaxErrors } from '../utils/syntaxValidator';
 
 interface ChatContextType {
   currentChat: Chat | null;
   chats: Chat[];
   settings: Settings;
   generatedExtension: GeneratedExtension | null;
+  pageContext: PageContext | null;
   createNewChat: () => void;
   selectChat: (chatId: string) => void;
   deleteChat: (chatId: string) => void;
-  sendMessage: (content: string) => Promise<void>;
+  sendMessage: (content: string, includePageContext?: boolean) => Promise<void>;
   updateSettings: (settings: Partial<Settings>) => void;
   setGeneratedExtension: (extension: GeneratedExtension | null) => void;
+  setPageContext: (context: PageContext | null) => void;
 }
 
 const ChatContext = createContext<ChatContextType | undefined>(undefined);
@@ -25,6 +29,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     temperature: 1.0,
   });
   const [generatedExtension, setGeneratedExtension] = useState<GeneratedExtension | null>(null);
+  const [pageContext, setPageContext] = useState<PageContext | null>(null);
 
   useEffect(() => {
     // Load data from chrome storage
@@ -107,7 +112,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     chrome.storage.local.set({ chats: updatedChats });
   };
 
-  const sendMessage = async (content: string) => {
+  const sendMessage = async (content: string, includePageContext: boolean = false) => {
     if (!currentChat || !settings.apiKey) return;
 
     const userMessage: Message = {
@@ -143,55 +148,221 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const chatWithAssistant = { ...updatedChat, messages: messagesWithAssistant };
     setCurrentChat(chatWithAssistant);
 
-    // Call OpenAI API with streaming (disabled for GPT-5 due to organization verification requirement)
+    // Call OpenAI API
     try {
       // GPT-5 only supports temperature of 1
       const effectiveTemperature = settings.model === 'gpt-5' ? 1 : settings.temperature;
 
-      // GPT-5 requires organization verification for streaming, so disable it
-      const useStreaming = settings.model !== 'gpt-5';
-
-      console.log('Calling OpenAI API with model:', settings.model, useStreaming ? '(streaming enabled)' : '(streaming disabled)');
+      console.log('Calling OpenAI API with model:', settings.model);
       console.log('API Key starts with:', settings.apiKey.substring(0, 10) + '...');
+
+      // Estimate token count (rough approximation: 1 token ≈ 4 characters)
+      const estimateTokens = (text: string) => Math.ceil(text.length / 4);
+
+      // Estimate generation time based on model speed (tokens per second)
+      const modelSpeed = {
+        'gpt-5': 40,           // ~40 tokens/sec
+        'gpt-4o': 80,          // ~80 tokens/sec
+        'gpt-4o-mini': 120,    // ~120 tokens/sec
+        'gpt-4-turbo': 60,     // ~60 tokens/sec
+        'gpt-4': 40,           // ~40 tokens/sec
+        'gpt-3.5-turbo': 150   // ~150 tokens/sec
+      };
 
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minute timeout
 
-      const systemPrompt = `You are an expert Chrome extension developer. Generate complete, working Chrome extension code based on user requirements.
+      const systemPrompt = `You are an expert Chrome extension developer. Generate complete, working Chrome extensions with modern UI.
 
-IMPORTANT: Your response should have TWO parts:
-
-1. A short, friendly summary (2-3 sentences) describing what the extension does
-2. The complete extension code in JSON format
-
-Format your response like this:
-Created a [Extension Name] Chrome extension that [brief description of functionality].
+RESPONSE FORMAT:
+Write a short, friendly summary (2-3 sentences) describing what the extension does, then provide the complete code in JSON format:
 
 \`\`\`json
 {
-  "manifest": {
-    "manifest_version": 3,
-    "name": "Extension Name",
-    "version": "1.0.0",
-    "description": "...",
-    // other manifest fields
-  },
+  "manifest": { /* manifest v3 */ },
   "files": {
-    "popup.html": "complete HTML code here",
-    "popup.js": "complete JavaScript code here",
-    "popup.css": "complete CSS code here",
-    "content.js": "complete content script code here (if needed)",
-    // other files as needed
+    "popup.html": "...",
+    "popup.css": "...",
+    "popup.js": "...",
+    "content.js": "...",
+    "background.js": "..." // OPTIONAL
   },
   "type": "popup"
 }
 \`\`\`
 
-Make sure:
-- The summary is conversational and explains what you built
-- All code is production-ready and follows Chrome extension best practices
-- Include all necessary files (HTML, CSS, JS)
-- Use manifest version 3`;
+CRITICAL REQUIREMENTS:
+
+1. FILE STRUCTURE:
+   - manifest: Separate field with manifest_version: 3, name, version, description, action, content_scripts
+   - files: 4 REQUIRED files: popup.html, popup.css, popup.js, content.js
+   - OPTIONAL: background.js (for persistent tasks, alarms, event listeners)
+   - ❌ NO manifest in "files" object
+   - ❌ NO icons, images, or other assets
+
+2. MANIFEST:
+   - "action": { "default_popup": "popup.html" }
+   - "content_scripts": [{ "matches": ["<all_urls>"], "js": ["content.js"] }]
+   - Adjust "matches" based on extension purpose (e.g., ["*://*.github.com/*"])
+   - Permissions: "activeTab", "storage" (always), + others as needed:
+     • "notifications" - for chrome.notifications
+     • "contextMenus" - for right-click menus
+     • "downloads" - for chrome.downloads
+   - Background script (if used): "background": { "service_worker": "background.js" }
+
+3. HTML:
+   - Reference LOCAL files: <link href="popup.css">, <script src="popup.js">
+   - ❌ NO CDN links (no https://, http://, //)
+   - Place <script> at end of <body>
+   - Use semantic HTML5: <header>, <main>, <section>
+   - Add ARIA labels for accessibility
+
+4. CSS (BEAUTIFUL MODERN UI):
+   Use CSS variables for consistent design:
+   :root {
+     --primary: #4f46e5;
+     --primary-hover: #4338ca;
+     --bg: #ffffff;
+     --surface: #f9fafb;
+     --text: #1f2937;
+     --border: #e5e7eb;
+     --radius: 8px;
+     --shadow: 0 1px 2px rgba(0,0,0,0.05);
+   }
+   body { width: 400px; padding: 16px; font-family: -apple-system, sans-serif; }
+   button { background: var(--primary); color: white; border: none; padding: 8px 16px; border-radius: var(--radius); cursor: pointer; transition: 0.2s; }
+   button:hover { background: var(--primary-hover); transform: translateY(-1px); }
+
+5. JAVASCRIPT (popup.js / content.js):
+   - Modern ES6+: const/let, arrow functions, async/await
+   - Promise-based Chrome APIs:
+     ✅ await chrome.storage.local.get(key);
+     ✅ await chrome.storage.local.set({ key: value });
+     ❌ NO callbacks: chrome.storage.local.get(key, callback);
+   - Use chrome.storage.onChanged for reactive updates
+   - Badge API: chrome.action.setBadgeText({ text: '5' });
+   - Notifications: chrome.notifications.create({ type: 'basic', title: '...', message: '...' });
+   - Downloads: chrome.downloads.download({ url: '...', filename: '...' });
+   - Error handling and input validation
+
+6. BACKGROUND SCRIPT (background.js - OPTIONAL):
+   Use ONLY when extension needs:
+   - Persistent tasks across popup closes
+   - chrome.alarms for scheduled/recurring tasks
+   - Event listeners: chrome.runtime.onInstalled, chrome.tabs.onUpdated, etc.
+   - Background data processing or sync
+
+   Example structure:
+   \`\`\`javascript
+   // Listen for extension installation
+   chrome.runtime.onInstalled.addListener(() => {
+     console.log('Extension installed');
+   });
+
+   // Set up alarms
+   chrome.alarms.create('myAlarm', { periodInMinutes: 60 });
+   chrome.alarms.onAlarm.addListener((alarm) => {
+     // Do something periodically
+   });
+
+   // Communicate with popup
+   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+     if (msg.action === 'getData') {
+       sendResponse({ data: '...' });
+     }
+     return true;
+   });
+   \`\`\`
+
+7. CONTENT SCRIPT:
+   - Runs on web pages (manifest.content_scripts.matches)
+   - chrome.runtime.onMessage.addListener MUST return true:
+     chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+       sendResponse({ result: 'data' });
+       return true; // REQUIRED for async
+     });
+   - If unused, add comment explaining it's for future use
+
+RULES:
+- Production-ready code only
+- Manifest v3 required
+- Local file references only
+- Complete, working extensions
+- Use background.js ONLY when needed (timers, alarms, persistent tasks)`;
+
+      // Add page context if enabled
+      let enhancedSystemPrompt = systemPrompt;
+      if (includePageContext && pageContext) {
+        enhancedSystemPrompt += `
+
+🌐 CURRENT WEBPAGE CONTEXT:
+The user is currently on this webpage. Use this information to generate a highly specific, context-aware extension.
+
+URL: ${pageContext.url}
+Title: ${pageContext.title}
+
+Page Structure (first 3000 chars):
+${pageContext.htmlSample}
+
+Key Elements:
+- Headings: ${pageContext.headings.slice(0, 5).join(', ')}${pageContext.headings.length > 5 ? '...' : ''}
+- Total Links: ${pageContext.stats.totalLinks}
+- Total Headings: ${pageContext.stats.totalHeadings}
+- Has Login Form: ${pageContext.stats.hasLoginForm ? 'Yes' : 'No'}
+- Has Search Box: ${pageContext.stats.hasSearchBox ? 'Yes' : 'No'}
+
+Top CSS Classes:
+${pageContext.mainSelectors.topClasses.slice(0, 10).map(c => `  .${c}`).join('\n')}
+
+Top Element IDs:
+${pageContext.mainSelectors.topIds.slice(0, 10).map(id => `  #${id}`).join('\n')}
+
+Page Text Sample (first 500 chars):
+${pageContext.text.substring(0, 500)}...
+
+CONTEXT-AWARE INSTRUCTIONS:
+- Generate selectors that work specifically for THIS page structure
+- Use exact class names and IDs you see in the HTML above
+- Make the extension hyper-targeted to this website (${new URL(pageContext.url).hostname})
+- Set manifest "matches" to specifically target this domain: ["*://*.${new URL(pageContext.url).hostname}/*"]
+- Reference actual elements from the page structure in your code
+- Extract data that's actually present on this page
+`;
+      }
+
+      // Calculate estimated prompt tokens
+      const allMessages = [
+        { role: 'system', content: enhancedSystemPrompt },
+        ...updatedMessages.map((m) => ({ role: m.role, content: m.content }))
+      ];
+      const promptText = allMessages.map(m => m.content).join('\n');
+      const estimatedPromptTokens = estimateTokens(promptText);
+      // Realistic completion tokens for extensions: ~8,000-10,000 (not max limit)
+      const estimatedCompletionTokens = 10000;
+      const estimatedTimeSeconds = Math.ceil(estimatedCompletionTokens / (modelSpeed[settings.model] || 60));
+
+      console.log(`📊 Estimated prompt tokens: ${estimatedPromptTokens}`);
+      console.log(`⏱️ Estimated generation time: ${Math.floor(estimatedTimeSeconds / 60)}m ${estimatedTimeSeconds % 60}s`);
+
+      // Build request body with model-specific token limit parameter
+      const requestBody: any = {
+        model: settings.model,
+        messages: allMessages,
+        temperature: effectiveTemperature,
+        stream: false,
+      };
+
+      // Set model-specific token limits based on each model's maximum
+      // GPT-5 uses max_completion_tokens, others use max_tokens
+      if (settings.model === 'gpt-5') {
+        requestBody.max_completion_tokens = 20000; // GPT-5 supports higher limits
+      } else if (settings.model === 'gpt-4o' || settings.model === 'gpt-4o-mini') {
+        requestBody.max_tokens = 16000; // GPT-4o max: 16384, use 16000 for safety
+      } else if (settings.model === 'gpt-4' || settings.model === 'gpt-4-turbo') {
+        requestBody.max_tokens = 4000; // GPT-4 max: 4096, use 4000 for safety
+      } else {
+        requestBody.max_tokens = 4000; // GPT-3.5-turbo and others: 4096 max
+      }
 
       const response = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
@@ -199,18 +370,7 @@ Make sure:
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${settings.apiKey}`,
         },
-        body: JSON.stringify({
-          model: settings.model,
-          messages: [
-            {
-              role: 'system',
-              content: systemPrompt,
-            },
-            ...updatedMessages.map((m) => ({ role: m.role, content: m.content })),
-          ],
-          temperature: effectiveTemperature,
-          stream: useStreaming,
-        }),
+        body: JSON.stringify(requestBody),
         signal: controller.signal,
       });
 
@@ -225,166 +385,52 @@ Make sure:
       }
 
       let accumulatedContent = '';
-      let isGeneratingCode = false; // Track if we've entered the code block
 
-      if (useStreaming) {
-        // Process streaming response
-        const reader = response.body?.getReader();
-        const decoder = new TextDecoder();
+      // Show progress stages with dynamic, fun messages like Claude Code
+      const funnyMessages = [
+        'Thinking', 'Pondering', 'Analyzing', 'Brainstorming', 'Contemplating',
+        'Ideating', 'Architecting', 'Designing', 'Blueprinting', 'Sketching',
+        'Crafting', 'Building', 'Constructing', 'Assembling', 'Weaving',
+        'Coding', 'Typing', 'Scripting', 'Programming', 'Compiling',
+        'Generating', 'Creating', 'Manifesting', 'Conjuring', 'Materializing',
+        'Polishing', 'Refining', 'Optimizing', 'Perfecting', 'Fine-tuning',
+        'Seasoning', 'Marinating', 'Simmering', 'Baking', 'Sautéing',
+        'Mixing', 'Blending', 'Whisking', 'Kneading', 'Folding',
+        'Emulsifying', 'Caramelizing', 'Glazing', 'Garnishing', 'Plating'
+      ];
 
-        if (!reader) {
-          throw new Error('Response body reader not available');
-        }
+      const progressStages = [
+        { delay: 0, messageBase: funnyMessages[Math.floor(Math.random() * 5)], percent: 10 },
+        { delay: 8000, messageBase: funnyMessages[5 + Math.floor(Math.random() * 5)], percent: 20 },
+        { delay: 16000, messageBase: funnyMessages[10 + Math.floor(Math.random() * 5)], percent: 30 },
+        { delay: 24000, messageBase: funnyMessages[15 + Math.floor(Math.random() * 5)], percent: 40 },
+        { delay: 32000, messageBase: funnyMessages[20 + Math.floor(Math.random() * 5)], percent: 50 },
+        { delay: 40000, messageBase: funnyMessages[25 + Math.floor(Math.random() * 5)], percent: 60 },
+        { delay: 48000, messageBase: funnyMessages[30 + Math.floor(Math.random() * 5)], percent: 70 },
+        { delay: 56000, messageBase: funnyMessages[35 + Math.floor(Math.random() * 5)], percent: 80 },
+        { delay: 64000, messageBase: funnyMessages[40 + Math.floor(Math.random() * 5)], percent: 90 },
+      ];
 
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
+      // Helper function to update progress stage with dynamic dots
+      let dotCount = 0;
+      const maxDots = 3;
+      const updateProgressStage = (stage: { messageBase: string }, index: number) => {
+        const dots = '.'.repeat((dotCount % (maxDots + 1)));
+        dotCount++;
 
-          const chunk = decoder.decode(value, { stream: true });
-          const lines = chunk.split('\n').filter(line => line.trim() !== '');
+        const estimatedMinutes = Math.floor(estimatedTimeSeconds / 60);
+        const estimatedSeconds = estimatedTimeSeconds % 60;
+        const timeDisplay = estimatedMinutes > 0
+          ? `~${estimatedMinutes}m ${estimatedSeconds}s`
+          : `~${estimatedSeconds}s`;
 
-          for (const line of lines) {
-            if (line.startsWith('data: ')) {
-              const data = line.slice(6);
-
-              if (data === '[DONE]') {
-                console.log('Stream completed');
-                break;
-              }
-
-              try {
-                const parsed = JSON.parse(data);
-                const delta = parsed.choices[0]?.delta?.content;
-
-                if (delta) {
-                  accumulatedContent += delta;
-
-                  // Check if we've hit the code block marker
-                  if (accumulatedContent.includes('```json')) {
-                    isGeneratingCode = true;
-                  }
-
-                  // Extract summary (everything before ```json)
-                  const summaryEndIndex = accumulatedContent.indexOf('```json');
-                  const displayContent = summaryEndIndex !== -1
-                    ? accumulatedContent.substring(0, summaryEndIndex).trim()
-                    : accumulatedContent;
-
-                  // Update the assistant message in real-time with ONLY summary text
-                  const updatedAssistantMessage: Message = {
-                    ...assistantMessage,
-                    content: accumulatedContent, // Store full content
-                    displayContent: displayContent, // But only display summary
-                    isGenerating: isGeneratingCode, // Flag for UI to show progress indicator
-                  };
-
-                  const updatedMessages = messagesWithAssistant.map(m =>
-                    m.id === assistantMessageId ? updatedAssistantMessage : m
-                  );
-
-                  const updatedChat = {
-                    ...chatWithAssistant,
-                    messages: updatedMessages,
-                    updatedAt: Date.now(),
-                  };
-
-                  setCurrentChat(updatedChat);
-
-                  // Update chats array
-                  const updatedChatsArray = chats.map((c) =>
-                    c.id === currentChat.id ? updatedChat : c
-                  );
-                  setChats(updatedChatsArray);
-                }
-              } catch (e) {
-                console.error('Error parsing stream chunk:', e);
-              }
-            }
-          }
-        }
-
-        console.log('Final accumulated content length:', accumulatedContent.length);
-      } else {
-        // Non-streaming response (for GPT-5)
-        // Show progress stages to provide feedback during long wait (up to 6 minutes)
-        const progressStages = [
-          { delay: 0, message: 'Analyzing your requirements...' },
-          { delay: 8000, message: 'Designing extension architecture...' },
-          { delay: 20000, message: 'Planning file structure...' },
-          { delay: 35000, message: 'Generating manifest.json...' },
-          { delay: 55000, message: 'Creating popup interface...' },
-          { delay: 80000, message: 'Writing HTML markup...' },
-          { delay: 110000, message: 'Styling with CSS...' },
-          { delay: 145000, message: 'Implementing core JavaScript logic...' },
-          { delay: 185000, message: 'Adding Chrome API integration...' },
-          { delay: 230000, message: 'Implementing event handlers...' },
-          { delay: 275000, message: 'Optimizing and testing code...' },
-          { delay: 320000, message: 'Finalizing extension files...' },
-          { delay: 350000, message: 'Almost ready, just a moment longer...' },
-        ];
-
-        // Helper function to update progress stage
-        const updateProgressStage = (stage: { message: string }, index: number) => {
-          const updatedAssistantMessage: Message = {
-            ...assistantMessage,
-            content: '',
-            displayContent: stage.message,
-            isGenerating: true,
-            progressStage: index,
-          };
-
-          const updatedMessages = messagesWithAssistant.map(m =>
-            m.id === assistantMessageId ? updatedAssistantMessage : m
-          );
-
-          const updatedChat = {
-            ...chatWithAssistant,
-            messages: updatedMessages,
-            updatedAt: Date.now(),
-          };
-
-          setCurrentChat(updatedChat);
-
-          // Also update chats array for persistence
-          const updatedChatsArray = chats.map((c) =>
-            c.id === currentChat.id ? updatedChat : c
-          );
-          setChats(updatedChatsArray);
-        };
-
-        // Show first stage immediately
-        updateProgressStage(progressStages[0], 0);
-
-        // Start progress stage updates for remaining stages
-        const progressIntervals: number[] = [];
-        progressStages.slice(1).forEach((stage, index) => {
-          const timeoutId = window.setTimeout(() => {
-            updateProgressStage(stage, index + 1);
-          }, stage.delay);
-
-          progressIntervals.push(timeoutId);
-        });
-
-        // Wait for API response
-        const data = await response.json();
-        console.log('OpenAI response:', data);
-        accumulatedContent = data.choices[0].message.content;
-
-        // Clear all pending progress intervals
-        progressIntervals.forEach(id => clearTimeout(id));
-
-        // Extract summary for non-streaming too
-        const summaryEndIndex = accumulatedContent.indexOf('```json');
-        const displayContent = summaryEndIndex !== -1
-          ? accumulatedContent.substring(0, summaryEndIndex).trim()
-          : accumulatedContent;
-
-        // Update the assistant message with complete content
         const updatedAssistantMessage: Message = {
           ...assistantMessage,
-          content: accumulatedContent,
-          displayContent: displayContent,
-          isGenerating: summaryEndIndex !== -1, // Show progress indicator while we parse
+          content: '',
+          displayContent: `${stage.messageBase}${dots} (${timeDisplay} estimated)`,
+          isGenerating: true,
+          progressStage: index,
+          estimatedTime: estimatedTimeSeconds,
         };
 
         const updatedMessages = messagesWithAssistant.map(m =>
@@ -398,20 +444,84 @@ Make sure:
         };
 
         setCurrentChat(updatedChat);
+
+        // Also update chats array for persistence
+        const updatedChatsArray = chats.map((c) =>
+          c.id === currentChat.id ? updatedChat : c
+        );
+        setChats(updatedChatsArray);
+      };
+
+      // Show first stage immediately
+      let currentStageIndex = 0;
+      updateProgressStage(progressStages[0], 0);
+
+      // Animate dots every 400ms for current stage
+      const dotAnimationInterval = window.setInterval(() => {
+        updateProgressStage(progressStages[currentStageIndex], currentStageIndex);
+      }, 400);
+
+      // Start progress stage updates for remaining stages
+      const progressIntervals: number[] = [dotAnimationInterval];
+      progressStages.slice(1).forEach((stage, index) => {
+        const timeoutId = window.setTimeout(() => {
+          currentStageIndex = index + 1;
+          updateProgressStage(stage, index + 1);
+        }, stage.delay);
+
+        progressIntervals.push(timeoutId);
+      });
+
+      // Wait for API response
+      const data = await response.json();
+      console.log('OpenAI response:', data);
+
+      // Extract token usage from API response
+      const tokenUsage = data.usage ? {
+        promptTokens: data.usage.prompt_tokens,
+        completionTokens: data.usage.completion_tokens,
+        totalTokens: data.usage.total_tokens
+      } : undefined;
+
+      if (tokenUsage) {
+        console.log(`📊 Actual token usage:`);
+        console.log(`   Prompt: ${tokenUsage.promptTokens} tokens`);
+        console.log(`   Completion: ${tokenUsage.completionTokens} tokens`);
+        console.log(`   Total: ${tokenUsage.totalTokens} tokens`);
       }
 
-      // Save final state to storage (clear isGenerating flag)
+      // Check if response was truncated due to token limit
+      const finishReason = data.choices[0].finish_reason;
+      if (finishReason === 'length') {
+        console.warn('⚠️ Response truncated due to token limit. Consider increasing max_completion_tokens.');
+      }
+
+      accumulatedContent = data.choices[0].message.content || '';
+
+      if (!accumulatedContent) {
+        throw new Error('Empty response from OpenAI API. The model may have hit token limits or encountered an error.');
+      }
+
+      // Clear all pending progress intervals and the dot animation interval
+      progressIntervals.forEach(id => {
+        clearTimeout(id);
+        clearInterval(id); // Also clear in case it's the dot animation interval
+      });
+
+      // Extract summary and save final state to storage
       const summaryEndIndex = accumulatedContent.indexOf('```json');
       const finalDisplayContent = summaryEndIndex !== -1
         ? accumulatedContent.substring(0, summaryEndIndex).trim()
         : accumulatedContent;
 
+      // Update the assistant message with complete content (clear isGenerating flag)
       const finalMessages = messagesWithAssistant.map(m =>
         m.id === assistantMessageId
-          ? { ...m, content: accumulatedContent, displayContent: finalDisplayContent, isGenerating: false }
+          ? { ...m, content: accumulatedContent, displayContent: finalDisplayContent, isGenerating: false, tokenUsage }
           : m
       );
       const finalChat = { ...chatWithAssistant, messages: finalMessages };
+      setCurrentChat(finalChat);
       const finalChats = chats.map((c) => (c.id === currentChat.id ? finalChat : c));
       setChats(finalChats);
       chrome.storage.local.set({ chats: finalChats });
@@ -422,23 +532,143 @@ Make sure:
           accumulatedContent.match(/\{[\s\S]*\}/);
         if (jsonMatch) {
           const extensionData = JSON.parse(jsonMatch[1] || jsonMatch[0]);
-          setGeneratedExtension(extensionData);
 
-          // Use the manifest name as the chat title
-          const chatTitle = extensionData.manifest?.name || currentChat.title;
-          console.log('Updated chat title from manifest:', chatTitle);
+          // Validate JavaScript syntax first
+          console.log('Validating JavaScript syntax...');
+          const syntaxResult = validateExtensionJavaScript(extensionData.files || {});
 
-          // Save extension to the current chat with updated title
-          const chatWithExtension = { ...finalChat, generatedExtension: extensionData, title: chatTitle };
-          setCurrentChat(chatWithExtension);
-          const chatsWithExtension = chats.map((c) =>
-            c.id === currentChat.id ? chatWithExtension : c
-          );
-          setChats(chatsWithExtension);
-          chrome.storage.local.set({ chats: chatsWithExtension });
+          if (!syntaxResult.valid) {
+            console.error('❌ JavaScript syntax errors found');
+            const syntaxErrorMessage = formatSyntaxErrors(syntaxResult.errors);
+
+            console.log('Auto-fixing syntax errors by asking AI to regenerate...');
+
+            const fixPrompt = `The extension code you generated has JavaScript syntax errors:\n\n${syntaxErrorMessage}\n\nPlease fix these syntax errors and provide the corrected extension code. Make sure to:\n1. Fix all the syntax errors listed above\n2. Validate that all JavaScript code is syntactically correct\n3. Return the complete, valid extension in the same JSON format as before`;
+
+            // Automatically send fix request
+            const fixRequestMessage: Message = {
+              id: (Date.now() + 2).toString(),
+              role: 'user',
+              content: fixPrompt,
+              timestamp: Date.now(),
+            };
+
+            const messagesWithFix = [...finalMessages, fixRequestMessage];
+            const chatWithFix = { ...finalChat, messages: messagesWithFix };
+            setCurrentChat(chatWithFix);
+            const chatsWithFix = chats.map((c) =>
+              c.id === currentChat.id ? chatWithFix : c
+            );
+            setChats(chatsWithFix);
+            chrome.storage.local.set({ chats: chatsWithFix });
+
+            // Recursively call sendMessage to get AI to fix it
+            setTimeout(() => {
+              sendMessage(fixPrompt);
+            }, 100);
+
+            return; // Stop processing, wait for AI to fix
+          }
+
+          console.log('✅ JavaScript syntax validation passed!');
+
+          // Validate extension structure
+          console.log('Validating extension structure...');
+          const validationResult = validateExtension(extensionData);
+
+          // Log validation results
+          if (validationResult.errors.length > 0) {
+            console.error('Extension validation errors:', validationResult.errors);
+          }
+          if (validationResult.warnings.length > 0) {
+            console.warn('Extension validation warnings:', validationResult.warnings);
+          }
+
+          // Only save extension if validation passes (no errors)
+          if (validationResult.isValid) {
+            console.log('✅ Extension validation passed!');
+            setGeneratedExtension(extensionData);
+
+            // Use the manifest name as the chat title
+            const chatTitle = extensionData.manifest?.name || currentChat.title;
+            console.log('Updated chat title from manifest:', chatTitle);
+
+            // Save extension to the current chat with updated title
+            const chatWithExtension = { ...finalChat, generatedExtension: extensionData, title: chatTitle };
+            setCurrentChat(chatWithExtension);
+            const chatsWithExtension = chats.map((c) =>
+              c.id === currentChat.id ? chatWithExtension : c
+            );
+            setChats(chatsWithExtension);
+            chrome.storage.local.set({ chats: chatsWithExtension });
+
+            // If there are warnings, add them to chat (optional)
+            if (validationResult.warnings.length > 0) {
+              console.log('Extension has warnings:', formatValidationErrors(validationResult));
+            }
+          } else {
+            // Validation failed - automatically ask AI to fix the issues
+            console.error('❌ Extension validation failed');
+            const validationErrorMessage = formatValidationErrors(validationResult);
+
+            console.log('Auto-fixing validation errors by asking AI to regenerate...');
+
+            const fixPrompt = `The extension you generated has validation errors:\n\n${validationErrorMessage}\n\nPlease fix these validation errors and provide the corrected extension code. Make sure to:\n1. Follow the exact file structure required (manifest.json + 4 files)\n2. Fix all the validation errors listed above\n3. Return the complete, valid JSON in the same format as before`;
+
+            // Automatically send fix request
+            const fixRequestMessage: Message = {
+              id: (Date.now() + 2).toString(),
+              role: 'user',
+              content: fixPrompt,
+              timestamp: Date.now(),
+            };
+
+            const messagesWithFix = [...finalMessages, fixRequestMessage];
+            const chatWithFix = { ...finalChat, messages: messagesWithFix };
+            setCurrentChat(chatWithFix);
+            const chatsWithFix = chats.map((c) =>
+              c.id === currentChat.id ? chatWithFix : c
+            );
+            setChats(chatsWithFix);
+            chrome.storage.local.set({ chats: chatsWithFix });
+
+            // Recursively call sendMessage to get AI to fix it
+            setTimeout(() => {
+              sendMessage(fixPrompt);
+            }, 100);
+          }
         }
       } catch (e) {
         console.error('Failed to parse extension data:', e);
+
+        // Instead of showing error to user, automatically ask AI to fix the JSON
+        console.log('Auto-fixing malformed JSON by asking AI to regenerate...');
+
+        const errorDetails = e instanceof Error ? e.message : 'Invalid JSON format';
+        const fixPrompt = `The JSON you provided has a syntax error: ${errorDetails}\n\nPlease fix the JSON and provide the corrected extension code. Make sure to:\n1. Fix the JSON syntax error\n2. Ensure all strings are properly quoted\n3. Ensure all commas are in the right places\n4. Return the complete, valid JSON in the same format as before`;
+
+        // Automatically send fix request (no user interaction needed)
+        const fixRequestMessage: Message = {
+          id: (Date.now() + 3).toString(),
+          role: 'user',
+          content: fixPrompt,
+          timestamp: Date.now(),
+        };
+
+        const messagesWithFix = [...finalMessages, fixRequestMessage];
+        const chatWithFix = { ...finalChat, messages: messagesWithFix };
+        setCurrentChat(chatWithFix);
+        const chatsWithFix = chats.map((c) =>
+          c.id === currentChat.id ? chatWithFix : c
+        );
+        setChats(chatsWithFix);
+        chrome.storage.local.set({ chats: chatsWithFix });
+
+        // Recursively call sendMessage to get AI to fix it
+        // Wait a bit to ensure state is updated
+        setTimeout(() => {
+          sendMessage(fixPrompt);
+        }, 100);
       }
     } catch (error) {
       console.error('Error calling OpenAI API:', error);
@@ -473,12 +703,14 @@ Make sure:
         chats,
         settings,
         generatedExtension,
+        pageContext,
         createNewChat,
         selectChat,
         deleteChat,
         sendMessage,
         updateSettings,
         setGeneratedExtension,
+        setPageContext,
       }}
     >
       {children}

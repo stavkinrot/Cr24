@@ -1,18 +1,58 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useChat } from '../context/ChatContext';
 import FileList from './FileList';
+import { capturePageContent, suggestPrompts } from '../utils/pageContext';
 import '../styles/ChatPanel.css';
 
 const ChatPanel: React.FC = () => {
-  const { currentChat, sendMessage, generatedExtension } = useChat();
+  const { currentChat, sendMessage, generatedExtension, pageContext, setPageContext } = useChat();
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [includePageContext, setIncludePageContext] = useState(false);
   const [messageExtensions, setMessageExtensions] = useState<Map<string, any>>(new Map());
+  const [loadingDots, setLoadingDots] = useState('');
+  const [loadingMessage, setLoadingMessage] = useState('Thinking');
+  const [suggestedPrompts, setSuggestedPrompts] = useState<string[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Funny loading messages
+  const funnyMessages = [
+    'Thinking', 'Pondering', 'Analyzing', 'Brainstorming', 'Contemplating',
+    'Ideating', 'Scheming', 'Plotting', 'Calculating', 'Computing'
+  ];
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [currentChat?.messages]);
+
+  // Animate loading dots and message when loading
+  useEffect(() => {
+    if (!isLoading) {
+      setLoadingDots('');
+      setLoadingMessage('Thinking');
+      return;
+    }
+
+    let dotCount = 0;
+    let messageIndex = 0;
+
+    // Animate dots every 400ms
+    const dotInterval = setInterval(() => {
+      dotCount = (dotCount + 1) % 4;
+      setLoadingDots('.'.repeat(dotCount));
+    }, 400);
+
+    // Change message every 7 seconds
+    const messageInterval = setInterval(() => {
+      messageIndex = (messageIndex + 1) % funnyMessages.length;
+      setLoadingMessage(funnyMessages[messageIndex]);
+    }, 7000);
+
+    return () => {
+      clearInterval(dotInterval);
+      clearInterval(messageInterval);
+    };
+  }, [isLoading]);
 
   // Track which messages have generated extensions
   useEffect(() => {
@@ -48,13 +88,36 @@ const ChatPanel: React.FC = () => {
     return content;
   };
 
+  // Handle capturing page context
+  const handleCapturePageContext = async () => {
+    const context = await capturePageContent();
+    if (context) {
+      setPageContext(context);
+      setIncludePageContext(true);
+      const prompts = suggestPrompts(context);
+      setSuggestedPrompts(prompts);
+    }
+  };
+
+  // Handle removing page context
+  const handleRemovePageContext = () => {
+    setPageContext(null);
+    setIncludePageContext(false);
+    setSuggestedPrompts([]);
+  };
+
+  // Handle suggested prompt click
+  const handleSuggestedPromptClick = (prompt: string) => {
+    setInput(prompt);
+  };
+
   const handleSend = async () => {
     if (!input.trim() || isLoading) return;
 
     setIsLoading(true);
     setInput(''); // Clear input immediately for better UX
     try {
-      await sendMessage(input);
+      await sendMessage(input, includePageContext);
     } catch (error) {
       console.error('Error in handleSend:', error);
     } finally {
@@ -113,7 +176,7 @@ const ChatPanel: React.FC = () => {
                   </div>
                 ) : isInitialStreaming ? (
                   <div className="message-text streaming">
-                    <span className="streaming-indicator">●</span> Thinking...
+                    <span className="streaming-indicator">●</span> {loadingMessage}{loadingDots}
                   </div>
                 ) : (
                   <>
@@ -129,7 +192,7 @@ const ChatPanel: React.FC = () => {
                   </>
                 )}
                 <div className="message-time">
-                  {new Date(message.timestamp).toLocaleTimeString()}
+                  {new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                 </div>
               </div>
             </div>
@@ -137,13 +200,60 @@ const ChatPanel: React.FC = () => {
         })}
         <div ref={messagesEndRef} />
       </div>
+
+      {/* Page Context Preview - Only shown when context is captured */}
+      {pageContext && (
+        <div className="page-context-section">
+          <div className="page-context-preview">
+            <div className="page-context-header">
+              {pageContext.favicon && <img src={pageContext.favicon} alt="" className="page-favicon" />}
+              <div className="page-info">
+                <strong>{pageContext.title}</strong>
+                <small>{new URL(pageContext.url).hostname}</small>
+              </div>
+              <button className="remove-context-button" onClick={handleRemovePageContext} title="Remove page context">
+                ✕
+              </button>
+            </div>
+            {suggestedPrompts.length > 0 && (
+              <div className="suggested-prompts">
+                <div className="suggested-prompts-label">Suggested:</div>
+                <div className="suggested-prompts-list">
+                  {suggestedPrompts.map((prompt, index) => (
+                    <button
+                      key={index}
+                      className="suggested-prompt-button"
+                      onClick={() => handleSuggestedPromptClick(prompt)}
+                      disabled={isLoading}
+                    >
+                      {prompt}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       <div className="input-container">
+        <button
+          className={`context-toggle-button ${pageContext ? 'active' : ''}`}
+          onClick={pageContext ? handleRemovePageContext : handleCapturePageContext}
+          title={pageContext ? 'Remove active tab context' : 'Include active tab context'}
+          disabled={isLoading}
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+            <polyline points="14 2 14 8 20 8"/>
+          </svg>
+        </button>
         <textarea
           className="chat-input"
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyPress={handleKeyPress}
-          placeholder="What would you like your extension to do?"
+          placeholder={pageContext ? "Describe what you want to do with this page..." : "What would you like your extension to do?"}
           disabled={isLoading}
         />
         <button

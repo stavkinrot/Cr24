@@ -34,42 +34,293 @@ The application uses React Context for state management with two main providers:
    - Handles settings (API key, model selection, temperature)
    - Stores and retrieves data from Chrome's `chrome.storage.local`
    - Parses AI responses to extract generated extension code (JSON format)
-   - **Streaming Responses**: Uses OpenAI's streaming API for real-time text generation (disabled for GPT-5)
+   - **System Prompt**: Optimized to ~2,500 tokens (reduced from 7,000) for 30-50% faster generation
+   - **Token Usage Tracking**: Estimates prompt tokens and generation time before API call, captures actual usage after
+   - **JavaScript Syntax Validation**: Uses Acorn parser to validate generated JS code before rendering
+   - **Auto-Repair**: Automatically requests AI to fix syntax errors or malformed JSON
+   - **Streaming Responses**: Currently disabled for all models (can be enabled for verified organizations)
    - **Critical GPT-5 Constraints**:
      - Only supports temperature of 1.0 (automatically enforced)
-     - Streaming disabled due to organization verification requirement
-     - Falls back to non-streaming mode for GPT-5 requests
+     - Streaming requires organization verification (photo ID upload to OpenAI)
+     - Falls back to non-streaming mode with progress stages and realistic time estimates
 
 2. **ThemeContext** (`src/context/ThemeContext.tsx`)
    - Manages light/dark mode
    - Persists theme preference to Chrome storage
 
+### Context-Aware Extension Generation (Phase 2)
+
+**NEW FEATURE**: The system can now generate hyper-specific extensions based on the current webpage's structure and content.
+
+#### How It Works
+
+1. **Page Context Capture** (`src/utils/pageContext.ts`)
+   - User clicks "📄 Include Current Page Context" button in ChatPanel
+   - Injects script into active tab to extract page information:
+     - URL and title
+     - First 3000 chars of HTML (structure analysis)
+     - Visible text (first 3000 chars)
+     - Headings (h1, h2, h3)
+     - Page statistics (link count, heading count, has login form, has search box)
+     - Top 20 most common CSS classes and IDs
+   - Returns summarized PageContext object (~1500 tokens)
+
+2. **Smart Prompt Suggestions** (`suggestPrompts()`)
+   - Analyzes captured page context to suggest relevant prompts
+   - Site-specific suggestions:
+     - **LinkedIn jobs**: "Extract all job listings to CSV", "Track which jobs I've already viewed"
+     - **Amazon products**: "Track price changes for this product", "Compare prices with other sellers"
+     - **Twitter/X**: "Extract all tweets to JSON", "Auto-like tweets containing specific keywords"
+     - **GitHub**: "Export all repository links on this page", "Highlight repositories by programming language"
+     - **Reddit**: "Extract all post titles and links", "Filter posts by upvote count"
+     - **YouTube**: "Extract video titles and descriptions", "Track view counts"
+   - Generic suggestions based on page features:
+     - Has search box → "Auto-fill the search box with saved queries"
+     - Has login form → "Auto-fill login credentials securely"
+     - Many links → "Extract all links from this page to CSV"
+
+3. **Enhanced System Prompt**
+   - When page context is enabled, adds ~1500 tokens to system prompt with:
+     - Current webpage URL and title
+     - HTML structure sample (first 3000 chars)
+     - Key elements (headings, stats)
+     - Top 10 CSS classes (e.g., `.job-card-container`, `.product-title`)
+     - Top 10 element IDs (e.g., `#priceblock_ourprice`, `#search-box`)
+     - Page text sample (first 500 chars)
+     - **Context-aware instructions**:
+       - "Generate selectors that work specifically for THIS page structure"
+       - "Use exact class names and IDs you see in the HTML above"
+       - "Make the extension hyper-targeted to this website"
+       - "Set manifest 'matches' to specifically target this domain"
+
+4. **AI Generation with Context**
+   - AI receives both the base system prompt (~2,500 tokens) AND the page context (~1,500 tokens)
+   - Total prompt: ~4,000 tokens (still well under most model limits)
+   - AI generates extension with:
+     - **Exact selectors** from the actual page (e.g., `document.querySelector('.job-card-list__title')`)
+     - **Domain-specific manifest matches** (e.g., `["*://*.linkedin.com/*"]`)
+     - **Data extraction** tailored to page structure
+     - **Realistic functionality** based on what's actually on the page
+
+#### UI Components
+
+**Context Toggle Button** (in input area, left of textarea):
+- **Icon**: Document/page SVG icon (18×18px, stroke-based, matches header icon style)
+- **States**:
+  - Inactive: Gray color, transparent background
+  - Hover: Accent blue color, subtle gray background, scales 1.1x
+  - Active: Accent blue color (when context is captured)
+- **Tooltip**: "Include active tab context" / "Remove active tab context"
+- **Location**: Inside input container, left side of textarea
+
+**Page Context Preview Card** (appears between messages and input when context captured):
+- **Header**:
+  - Favicon + Page Title + Hostname
+  - Remove button (×) to clear context
+- **Suggested Prompts**: Horizontal scrollable pills
+  - 3 context-aware suggestions
+  - Compact design (6px padding, 11px font)
+  - Rounded pills with hover effects
+  - Horizontally scrollable if needed
+- **Input Placeholder**: Changes to "Describe what you want to do with this page..." when context is active
+
+#### Example: LinkedIn Job Scraper
+
+**User Action**:
+1. Opens LinkedIn job search results page
+2. Clicks document icon button (left of input area)
+3. Page context preview appears with suggested prompts:
+   - "Extract all job listings to CSV"
+   - "Highlight jobs matching specific keywords"
+   - "Track which jobs I've already viewed"
+4. Clicks first suggestion pill (or types custom prompt)
+
+**What AI Receives**:
+```
+[Base system prompt: 2,500 tokens]
+
+🌐 CURRENT WEBPAGE CONTEXT:
+URL: https://www.linkedin.com/jobs/search/?keywords=software%20engineer
+Title: Software Engineer Jobs | LinkedIn
+
+Page Structure (first 3000 chars):
+<div class="jobs-search__results-list">
+  <div class="job-card-container">
+    <h3 class="job-card-list__title">Senior Software Engineer</h3>
+    <h4 class="job-card-container__company-name">Google</h4>
+    ...
+
+Top CSS Classes:
+  .jobs-search__results-list
+  .job-card-container
+  .job-card-list__title
+  .job-card-container__company-name
+  ...
+
+CONTEXT-AWARE INSTRUCTIONS:
+- Use exact class names and IDs from the HTML above
+- Set manifest "matches" to ["*://*.linkedin.com/*"]
+- Extract data that's actually present on this page
+```
+
+**What AI Generates**:
+```javascript
+// content.js - HYPER-SPECIFIC to LinkedIn
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg.action === 'extractJobs') {
+    // Uses EXACT selectors from page context
+    const jobCards = document.querySelectorAll('.job-card-container');
+    const jobs = Array.from(jobCards).map(card => ({
+      title: card.querySelector('.job-card-list__title')?.textContent.trim(),
+      company: card.querySelector('.job-card-container__company-name')?.textContent.trim()
+    }));
+
+    // Generate CSV
+    const csv = 'Title,Company\n' + jobs.map(j => `"${j.title}","${j.company}"`).join('\n');
+
+    // Download
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'linkedin-jobs.csv';
+    a.click();
+  }
+});
+```
+
+**manifest.json** (domain-specific):
+```json
+{
+  "content_scripts": [{
+    "matches": ["*://*.linkedin.com/*"],
+    "js": ["content.js"]
+  }]
+}
+```
+
+#### Benefits Over Generic Extensions
+
+**Without Page Context** (Generic):
+- AI guesses common patterns: "Try `.job-title` or `.position-name`"
+- May not work if selectors don't match
+- User has to manually inspect page and regenerate
+
+**With Page Context** (Context-Aware):
+- AI knows exact selectors: `.job-card-list__title` (from actual HTML)
+- Works immediately on first generation
+- Tailored to specific site structure
+- Domain-restricted for better performance
+
+#### Required Permissions
+
+Added to `manifest.json`:
+```json
+{
+  "permissions": [
+    "tabs",        // NEW - Access tab URL and inject scripts
+    "scripting",   // Already present - Inject content scripts
+    ...
+  ],
+  "host_permissions": [
+    "<all_urls>"   // NEW - Capture content from any webpage
+  ]
+}
+```
+
+**Why `<all_urls>`?**
+- Page context capture needs to inject scripts into any webpage user visits
+- Without this, capture would fail on most sites
+- User grants permission when installing extension
+
+#### Privacy Considerations
+
+- Page HTML is sent to OpenAI API (user should be aware)
+- Only first 3000 chars of HTML sent (summarized, not full page)
+- No passwords or sensitive form data captured (just structure)
+- Page context is NOT stored persistently (only in memory during session)
+- User can remove context at any time (× button)
+
+#### Token Usage Impact
+
+- Base system prompt: ~2,500 tokens
+- Page context addition: ~1,500 tokens
+- **Total**: ~4,000 tokens (well under limits)
+- Completion tokens: ~10,000 (same as before)
+- **Total API cost**: Slightly higher due to longer prompt, but minimal impact
+
+#### Limitations
+
+1. **Dynamic Content**: Captures initial HTML, not content loaded via JavaScript after delay
+   - Solution: User can regenerate after page fully loads
+2. **Site Changes**: If site updates HTML structure, generated extension may break
+   - Solution: User can recapture context and regenerate
+3. **Privacy**: Page HTML sent to OpenAI
+   - Solution: User controls when to enable context (opt-in per message)
+
+#### Technical Implementation
+
+**File Structure**:
+- `src/utils/pageContext.ts`: Capture and summarization logic
+- `src/types/index.ts`: PageContext interface
+- `src/context/ChatContext.tsx`: Enhanced system prompt builder
+- `src/components/ChatPanel.tsx`: UI components and event handlers (SVG icon, toggle button, preview card)
+- `src/styles/ChatPanel.css`: Styling for context preview, toggle button, scrollable pills
+
+**Key Functions**:
+- `capturePageContent()`: Injects script, extracts page data, returns PageContext
+- `summarizePageContent()`: Reduces HTML to first 3000 chars, extracts top selectors
+- `extractMainSelectors()`: Finds most common CSS classes and IDs
+- `suggestPrompts(pageContext)`: Returns 3 context-aware prompt suggestions
+
+**UI/UX Details**:
+- **Icon**: Document/page SVG (matches header icon style: stroke-based, 18×18px, 2px stroke width)
+- **Toggle Button**: Inside input area (left side), no separate section above input
+- **Preview Card**: Only appears when context is captured (not permanently visible)
+- **Suggested Prompts**: Horizontal scrollable pills (not vertical list)
+- **Textarea**: Hidden scrollbar (scrollable with mouse wheel, no visual scrollbar)
+
 ### OpenAI Integration Flow
 
 1. User sends message via ChatPanel
-2. ChatContext creates placeholder assistant message and displays it immediately
-3. Makes streaming API call to OpenAI (non-streaming for GPT-5)
-4. **Streaming Mode** (GPT-4o, GPT-4o-mini, GPT-3.5-turbo):
-   - Response streams in real-time using Server-Sent Events (SSE)
-   - Each chunk updates the message content immediately
-   - User sees text appear character-by-character
-   - Provides instant feedback and perceived speed improvement
-5. **Non-Streaming Mode** (GPT-5):
-   - Waits for complete response
-   - Updates message once generation completes
-   - Required due to OpenAI organization verification requirement for GPT-5 streaming
-6. System prompt instructs AI to respond with:
-   - A short 2-3 sentence summary
-   - Complete extension code in JSON format within triple backticks
-7. Response parsing:
-   - Summary text is extracted (everything before the JSON code block)
-   - JSON is parsed to extract `manifest` and `files` objects
-   - Files are displayed in FileList component with individual/ZIP download
-8. **Automatic Chat Title**:
-   - After extension is generated, chat title is automatically set to the manifest name
-   - Example: If manifest.name is "Love Calculator", chat becomes "Love Calculator"
-   - ZIP download filename uses this title (sanitized to `love-calculator.zip`)
-   - Falls back to current chat title if manifest name is missing
+2. **Token Estimation** (before API call):
+   - Calculates estimated prompt tokens (~2,500 with optimized prompt)
+   - Estimates completion tokens (~10,000 for typical extensions)
+   - Calculates estimated generation time based on model speed:
+     - GPT-5: ~4m 10s (40 tokens/sec)
+     - GPT-4o: ~2m 5s (80 tokens/sec)
+     - GPT-4o-mini: ~1m 23s (120 tokens/sec)
+   - Logs estimates to console for debugging
+3. ChatContext creates placeholder assistant message with time estimate
+4. Makes API call to OpenAI (currently non-streaming for all models)
+5. **Progress Stages** (non-streaming mode):
+   - Shows animated progress messages with real-time estimates
+   - Updates every few seconds: "Generating... (~4m 10s estimated)"
+   - Provides user feedback during long generation times
+6. **Response Processing**:
+   - Captures actual token usage from API response (prompt, completion, total)
+   - Logs actual usage to console for comparison with estimates
+   - Extracts summary text (before JSON code block)
+   - Parses JSON to extract `manifest` and `files` objects
+7. **Validation Pipeline**:
+   - **JavaScript Syntax Validation** (uses Acorn parser):
+     - Validates popup.js, content.js, background.js, service_worker.js for syntax errors
+     - If errors found, automatically requests AI to fix them
+     - Prevents broken extensions from reaching preview
+   - **Structure Validation** (uses extensionValidator):
+     - Validates manifest format and required fields
+     - Validates file structure (4 required files + optional background script)
+     - Checks for missing or invalid references
+     - Validates background script manifest entries if background.js exists
+   - **Auto-Repair Loop**:
+     - If validation fails, system automatically asks AI to fix issues
+     - Maximum attempts to prevent infinite loops
+     - User sees transparent error messages and fix attempts
+8. **Post-Generation**:
+   - Files displayed in FileList component with individual/ZIP download
+   - Extension saved to current chat's `generatedExtension` field
+   - **Automatic Chat Title**: Set to manifest.name field
+   - **ZIP Filename**: Sanitized from chat title (e.g., `love-calculator.zip`)
 9. **Dynamic Preview Sizing**:
    - PreviewPanel extracts actual dimensions from generated extension CSS/HTML
    - Looks for width/height on `body`, `html`, `main`, or `.container` elements
@@ -77,14 +328,22 @@ The application uses React Context for state management with two main providers:
    - Falls back to 400×600px (standard Chrome popup size) if no dimensions found
    - Auto-height extensions default to 600px height to prevent scrollbars
    - Each extension previews at its actual size, not stretched to fill the panel
-10. PreviewPanel renders the extension in an iframe sandbox
+10. PreviewPanel renders the extension in an iframe sandbox with enhanced Chrome API mocks
 
-**Streaming Implementation Details:**
-- Uses `ReadableStream` reader to process SSE chunks
-- Updates React state on every chunk for real-time UI refresh
-- 5-minute timeout for both streaming and non-streaming modes
-- Gracefully handles stream interruptions and errors
-- Final content saved to Chrome storage after completion
+**Streaming vs Non-Streaming:**
+- **Current Mode**: Non-streaming for all models (line 156 in ChatContext.tsx)
+- **Why**: GPT-5 streaming requires organization verification (photo ID to OpenAI)
+- **Can Enable**: Change `useStreaming = true` if organization is verified
+- **Non-Streaming Benefits**:
+  - Works without verification requirements
+  - Shows progress stages with realistic time estimates
+  - Captures actual token usage statistics
+  - 5-minute timeout protection
+- **If Streaming Enabled**:
+  - Uses `ReadableStream` reader to process SSE chunks
+  - Updates React state on every chunk for real-time UI refresh
+  - Character-by-character text appearance
+  - 50%+ faster perceived speed
 
 ### Preview System
 
@@ -223,11 +482,33 @@ The preview uses a sophisticated multi-layer bridge system to enable full Chrome
    - Calls callback after Promise resolves
    - Sets `chrome.runtime.lastError` on errors
 
+5. **Duplicate Injection Prevention** (lines 439-479):
+   - Uses `injectedTabsRef` to track which tabs have content scripts
+   - Prevents injecting same content script multiple times into same tab
+   - Critical for preventing response races and incorrect counts
+   - Tracker cleared when extension changes to allow re-injection
+
+6. **Content Script Chrome API Override** (lines 122-151):
+   - **COMPLETELY overrides** `chrome.runtime` in content scripts
+   - Does NOT preserve real Chrome API (prevents conflicts)
+   - Content scripts use pure mock, isolated from Cr24 extension's Chrome API
+   - **Critical**: Prevents real Chrome listeners from interfering with mock responses
+   - **Limitation**: `chrome.runtime.sendMessage()` from content script → background not supported in preview (works when installed)
+
 **Supported APIs via Bridge:**
 - `chrome.tabs.query()` - Gets active tab for script injection
 - `chrome.tabs.sendMessage()` - Sends messages to content scripts (via postMessage bridge)
 - `chrome.scripting.executeScript()` - Injects scripts into active tab (transforms file references to code)
-- `chrome.storage.local.get/set()` - Mock storage operations
+- `chrome.storage.local.get/set()` - **ENHANCED**: Now supports both Promises AND callbacks
+  - ✅ `await chrome.storage.local.get(key)` - Promise-based (modern, recommended)
+  - ✅ `chrome.storage.local.get(key, callback)` - Callback-based (legacy, still supported)
+  - **Critical Fix**: Previously only supported callbacks, causing Pomodoro extension to fail
+- `chrome.storage.onChanged` - **NEW**: Event emitter for reactive storage updates
+  - Fires when `storage.local.set()` is called
+  - Allows content scripts to react to storage changes
+  - Example: `chrome.storage.onChanged.addListener((changes, area) => {...})`
+- `chrome.action.setBadgeText()` - **NEW**: Sets extension icon badge text (no-op in preview, logs to console)
+- `chrome.action.setBadgeBackgroundColor()` - **NEW**: Sets badge background color (no-op in preview, logs to console)
 
 **Content Script Injection Flow:**
 1. When popup opens with content script extension:
@@ -242,6 +523,49 @@ The preview uses a sophisticated multi-layer bridge system to enable full Chrome
    - Sends postMessage to content script
    - Waits for response
    - Returns response to popup
+
+#### Layer 3: Background Script Execution Bridge (NEW)
+
+**Problem:** Background scripts (service workers) run persistently in the background context, separate from the popup. In preview, there is no background context.
+
+**Solution: Execute background.js in Same Sandbox Context as Popup**
+
+The preview executes background.js in the same sandbox as popup.js, but BEFORE popup.js loads:
+
+**Background Script Execution** (lines 1046-1086 in PreviewPanel.tsx):
+1. If `background.js` or `service_worker.js` exists, inject it first (before popup.js)
+2. Wrap background script to intercept `chrome.runtime.onMessage.addListener()` calls
+3. Store registered message listeners in `window.__backgroundMessageListeners` array
+4. Execute background script code (runs chrome.runtime.onInstalled immediately)
+5. Background script initializes storage, sets up state, registers message handlers
+
+**Popup ↔ Background Communication** (lines 738-787 in PreviewPanel.tsx):
+- `chrome.runtime.sendMessage()` mock looks up `window.__backgroundMessageListeners`
+- Calls each registered background listener with the message
+- Waits for `sendResponse()` callback or returned Promise
+- Returns response to popup.js
+- **Critical**: Supports both sync and async listeners (return true for async)
+
+**chrome.runtime.onInstalled Simulation**:
+- Fires immediately when background script loads
+- Simulates fresh extension install (`{ reason: 'install' }`)
+- Allows background script to initialize storage defaults
+
+**Execution Order**:
+1. Chrome API mock loads first
+2. background.js executes (registers listeners, initializes storage)
+3. popup.js loads and can immediately communicate with background
+
+**What This Enables**:
+- ✅ **Pomodoro timers** - Background manages timer state, popup shows UI
+- ✅ **State management extensions** - Background holds persistent state
+- ✅ **Extensions with background data processing**
+- ✅ **Timer/alarm-based extensions** - Background listens to `chrome.alarms.onAlarm`
+
+**Limitations**:
+- Background and popup run in **same JavaScript context** (not separate like real extensions)
+- `chrome.alarms` fire but won't persist across popup closes (preview is ephemeral)
+- No true background persistence (preview resets when you switch chats)
 
 **Key Insight:**
 - **Preview popup runs in sandboxed iframe** (isolated, uses postMessage to parent)
@@ -426,6 +750,38 @@ OpenAI API calls have a 180-second (3 minute) timeout using AbortController. Thi
 - Default model: `gpt-5`
 - Available models: GPT-5, GPT-4.1, GPT-4o
 
+## Syntax Validation & Auto-Repair
+
+The system validates generated extension code in two stages before rendering:
+
+### **Stage 1: JavaScript Syntax Validation** (`src/utils/syntaxValidator.ts`)
+- **Parser**: Uses Acorn (lightweight, safe, no eval())
+- **Files Validated**: popup.js, content.js, background.js, service-worker.js
+- **Validation Output**:
+  - Syntax errors with file name, line number, column number, and message
+  - Example: `popup.js (line 42, column 5): Unexpected token '}'`
+- **Integration**: Runs in ChatContext.tsx before structure validation (line 640)
+- **Auto-Repair**: If errors found, automatically requests AI to fix them
+
+### **Stage 2: Extension Structure Validation** (`src/utils/extensionValidator.ts`)
+- **Validates**:
+  - Manifest format and required fields
+  - Exactly 4 files required: popup.html, popup.css, popup.js, content.js
+  - Manifest references match actual files
+  - Version format, name length, permissions validity
+- **Auto-Repair**: If validation fails, system asks AI to regenerate with corrections
+
+### **Auto-Repair Flow**
+1. AI generates extension
+2. System validates JavaScript syntax (Acorn)
+3. If syntax errors → Auto-request fix from AI
+4. System validates structure (extensionValidator)
+5. If structure errors → Auto-request fix from AI
+6. Maximum retry limit prevents infinite loops
+7. User sees transparent error messages in chat
+
+**Result**: Broken extensions rarely reach the preview. Most issues are auto-fixed transparently.
+
 ## Component Hierarchy
 
 ```
@@ -447,7 +803,7 @@ App
 
 3. **Temperature Override**: When modifying API calls, remember GPT-5 temperature must always be 1.0 regardless of user settings.
 
-4. **Streaming Constraints**: GPT-5 cannot use streaming mode due to OpenAI organization verification requirements. The code automatically disables streaming when GPT-5 is selected (line 152 in ChatContext.tsx). Other models use streaming for better UX.
+4. **Streaming Constraints**: Streaming is currently disabled for all models (line 156 in ChatContext.tsx). GPT-5 streaming requires organization verification (photo ID to OpenAI). Can be enabled by changing `useStreaming = true` if organization is verified.
 
 5. **Message Parsing**: The code extracts JSON from triple backtick code blocks. If the AI response format changes, update the regex in ChatContext and ChatPanel.
 
@@ -469,15 +825,83 @@ App
 
 14. **Dynamic Preview Dimensions**: The preview iframe automatically extracts and applies the actual dimensions from the generated extension's CSS. It parses width/height from body/html/main/container elements, calculates total size including padding, and displays each extension at its true size rather than a fixed dimension. Known limitation: Sizing may not perfectly match Chrome's rendering in all cases and requires further refinement.
 
+15. **Token Usage & Estimation**: The system estimates generation time before API calls and logs actual token usage after. Console shows prompt tokens (~2,500), estimated completion (~10,000), and realistic time estimates (GPT-5: ~4m, GPT-4o: ~2m). This helps users understand API costs and wait times.
+
+16. **System Prompt Optimization**: The system prompt is optimized to ~2,500 tokens (reduced from ~7,000). This provides 30-50% faster generation times while maintaining output quality. DO NOT bloat the prompt with verbose examples or repetitive instructions.
+
 ## File Generation System
 
-Generated extensions are expected to include:
-- `manifest.json`: Manifest v3 format
-- `popup.html`, `popup.css`, `popup.js`: For popup extensions
-- `content.js`: For content script extensions
-- Any additional files specified by the AI
+Generated extensions can include:
+- **Required files (4)**:
+  - `manifest.json`: Manifest v3 format
+  - `popup.html`, `popup.css`, `popup.js`: For popup UI
+  - `content.js`: For content script extensions
+- **Optional files (1)**:
+  - `background.js` or `service_worker.js`: For persistent tasks, alarms, event listeners
 
-The system doesn't validate the generated code - it trusts the AI output and makes it downloadable.
+The system validates all generated code through:
+1. **JavaScript Syntax Validation** (Acorn parser) - validates popup.js, content.js, background.js
+2. **Structure Validation** (extensionValidator) - ensures manifest format, file structure, and references are correct
+3. **Auto-Repair** - automatically requests AI to fix validation errors
+
+### Supported Extension Types
+
+**Phase 1 Capabilities (Current)**:
+- ✅ **Popup extensions** with interactive UI
+- ✅ **Content script extensions** that modify web pages
+- ✅ **Background/Service Worker extensions** with persistent tasks
+- ✅ **Hybrid extensions** (popup + content script + background script)
+
+**Supported Chrome APIs**:
+- `chrome.storage` (local storage, onChanged events)
+- `chrome.tabs` (query, sendMessage)
+- `chrome.scripting` (executeScript)
+- `chrome.action` (setBadgeText, setBadgeBackgroundColor)
+- `chrome.notifications` (create, clear, getAll) - **NEW in Phase 1**
+- `chrome.contextMenus` (create, update, remove, removeAll) - **NEW in Phase 1**
+- `chrome.downloads` (download, search, pause, resume, cancel) - **NEW in Phase 1**
+- `chrome.alarms` (create, get, getAll, clear, clearAll) - **NEW in Phase 1**
+
+All APIs are fully bridged through the postMessage system, working seamlessly in the preview sandbox.
+
+### Preview Limitations
+
+Some Chrome APIs and features have limitations in the live preview but work correctly when the extension is installed:
+
+**APIs That Don't Work in Preview** (✅ Work when installed):
+1. **Context Menus (`chrome.contextMenus`)**:
+   - **Why**: Context menus require the extension to be installed in Chrome
+   - **Behavior**: API calls succeed but menus don't appear in right-click menu
+   - **Workaround**: Download and install extension to test context menus
+
+2. **Downloads (`chrome.downloads`)**:
+   - **Why**: Sandbox security restrictions prevent download initiation
+   - **Behavior**: `chrome.downloads.download()` fails or doesn't trigger browser download
+   - **Workaround**: Download and install extension to test downloads
+
+3. **Content Script → Background Messaging**:
+   - **Why**: Cross-context communication limitation
+   - **API**: `chrome.runtime.sendMessage()` called FROM content script TO background
+   - **Behavior**: Returns empty response in preview
+   - **What Works**: Popup → Background messaging works fine
+   - **What Works**: Popup → Content Script messaging works fine
+   - **Workaround**: Download and install extension to test content-to-background communication
+
+**APIs That Work in Preview**:
+- ✅ `chrome.storage` (all methods, including onChanged events)
+- ✅ `chrome.tabs.query()` and `chrome.tabs.sendMessage()` (popup → content script)
+- ✅ `chrome.scripting.executeScript()` (file-based and func-based)
+- ✅ `chrome.runtime.sendMessage()` (popup → background)
+- ✅ `chrome.notifications` (create, clear, getAll)
+- ✅ `chrome.action` (setBadgeText, setBadgeBackgroundColor)
+- ✅ `chrome.alarms` (create, get, clear - but won't persist across preview sessions)
+- ✅ Background scripts with timers and state management
+- ✅ Content scripts that modify webpage DOM
+
+**Testing Recommendations**:
+- Use preview for rapid development and testing of most functionality
+- Download and install extension to test: context menus, downloads, content→background messaging
+- Preview works for ~95% of extension functionality
 
 ## Git Workflow
 

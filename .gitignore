@@ -31,3 +31,6 @@ dist-ssr
 
 # Development utilities
 create-icons.html
+
+# Documentation (work in progress)
+CONTRIBUTING.md

@@ -117,18 +117,19 @@ const PreviewPanel: React.FC = () => {
 
               const combinedCode = fileContents.join('\n\n');
 
-              // Wrap content script with Chrome API mock for message receiving
+              // Wrap content script with Chrome API mock for message receiving AND sending
               const wrappedCode = `
 (function() {
-  // Set up chrome.runtime.onMessage for content scripts
+  // COMPLETELY override chrome.runtime for content scripts (don't preserve real API)
+  // Content scripts should use our mock, not the real Cr24 extension's Chrome API
   if (!window.chrome) {
     window.chrome = {};
   }
-  if (!window.chrome.runtime) {
-    window.chrome.runtime = {};
-  }
 
-  // Create message listener system
+  // Force override chrome.runtime completely
+  window.chrome.runtime = {};
+
+  // Create message listener system (for receiving messages FROM popup/background)
   const messageListeners = [];
 
   window.chrome.runtime.onMessage = {
@@ -138,20 +139,45 @@ const PreviewPanel: React.FC = () => {
     }
   };
 
-  // Listen for messages from the extension
+  // sendMessage: Send messages TO background script
+  // For content script → background communication, this is a preview limitation
+  // In installed extensions, this works via real Chrome API
+  window.chrome.runtime.sendMessage = function(message, callback) {
+    console.log('[Content Script] sendMessage to background not supported in preview (works when installed)');
+
+    // Return empty response for preview
+    const promise = Promise.resolve({});
+
+    if (callback) {
+      promise.then(callback);
+    }
+
+    return promise;
+  };
+
+  // Listen for messages from the popup (via postMessage bridge)
   window.addEventListener('message', function(event) {
     // Only accept messages from same origin with our marker
     if (event.source !== window || !event.data || event.data.source !== 'crx-generator-popup') {
       return;
     }
 
-    console.log('[Content Script] Received message:', event.data);
+    console.log('[Content Script] Received message from popup:', event.data);
     const message = event.data.message;
 
     // Call all registered listeners
+    // Track if any listener sent a response
+    let responseSent = false;
+
     messageListeners.forEach(listener => {
+      if (responseSent) return; // Only use first response
+
       try {
-        listener(message, {}, function(response) {
+        const returnValue = listener(message, {}, function(response) {
+          // Only send first response
+          if (responseSent) return;
+          responseSent = true;
+
           // Send response back
           console.log('[Content Script] Sending response:', response);
           window.postMessage({
@@ -160,13 +186,18 @@ const PreviewPanel: React.FC = () => {
             response: response
           }, '*');
         });
+
+        // If listener returned true, it means async response is coming
+        if (returnValue === true) {
+          // Wait for sendResponse to be called
+        }
       } catch (err) {
         console.error('[Content Script] Error in message listener:', err);
       }
     });
   });
 
-  console.log('[Content Script] Chrome API mock initialized');
+  console.log('[Content Script] Chrome API mock initialized (with sendMessage support)');
 
   // Execute the actual content script
   ${combinedCode}
@@ -261,6 +292,75 @@ const PreviewPanel: React.FC = () => {
               chrome.storage.local.set(args[0], () => resolve());
             });
             result = {};
+          } else if (api === 'notifications' && method === 'create') {
+            // Chrome Notifications API
+            // Handle both (id, options) and (options) signatures
+            if (args.length === 2 && typeof args[0] === 'string') {
+              // (id, options) signature - 2 args, first is string
+              result = await chrome.notifications.create(args[0], args[1]);
+            } else if (args.length === 1) {
+              // (options) signature - 1 arg (options object)
+              result = await chrome.notifications.create(args[0]);
+            } else {
+              throw new Error('Invalid notifications.create signature');
+            }
+            console.log('Notification created:', result);
+          } else if (api === 'notifications' && method === 'clear') {
+            result = await chrome.notifications.clear(args[0]);
+          } else if (api === 'notifications' && method === 'getAll') {
+            result = await new Promise(resolve => {
+              chrome.notifications.getAll(resolve);
+            });
+          } else if (api === 'contextMenus' && method === 'create') {
+            // Chrome Context Menus API
+            const menuItem = args[0];
+            result = chrome.contextMenus.create(menuItem);
+            console.log('Context menu created:', result);
+          } else if (api === 'contextMenus' && method === 'update') {
+            await chrome.contextMenus.update(args[0], args[1]);
+            result = {};
+          } else if (api === 'contextMenus' && method === 'remove') {
+            await chrome.contextMenus.remove(args[0]);
+            result = {};
+          } else if (api === 'contextMenus' && method === 'removeAll') {
+            await chrome.contextMenus.removeAll();
+            result = {};
+          } else if (api === 'downloads' && method === 'download') {
+            // Chrome Downloads API
+            result = await chrome.downloads.download(args[0]);
+            console.log('Download started:', result);
+          } else if (api === 'downloads' && method === 'search') {
+            result = await chrome.downloads.search(args[0]);
+          } else if (api === 'downloads' && method === 'pause') {
+            await chrome.downloads.pause(args[0]);
+            result = {};
+          } else if (api === 'downloads' && method === 'resume') {
+            await chrome.downloads.resume(args[0]);
+            result = {};
+          } else if (api === 'downloads' && method === 'cancel') {
+            await chrome.downloads.cancel(args[0]);
+            result = {};
+          } else if (api === 'alarms' && method === 'create') {
+            // Chrome Alarms API (for background scripts)
+            // Handle both (name, alarmInfo) and (alarmInfo) signatures
+            if (typeof args[0] === 'string') {
+              // (name, alarmInfo) signature
+              await chrome.alarms.create(args[0], args[1]);
+              console.log('Alarm created:', args[0]);
+            } else {
+              // (alarmInfo) signature - creates unnamed alarm
+              await chrome.alarms.create(args[0]);
+              console.log('Unnamed alarm created');
+            }
+            result = {};
+          } else if (api === 'alarms' && method === 'get') {
+            result = await chrome.alarms.get(args[0]);
+          } else if (api === 'alarms' && method === 'getAll') {
+            result = await chrome.alarms.getAll();
+          } else if (api === 'alarms' && method === 'clear') {
+            result = await chrome.alarms.clear(args[0]);
+          } else if (api === 'alarms' && method === 'clearAll') {
+            result = await chrome.alarms.clearAll();
           }
 
           // Send result back to sandbox
@@ -288,9 +388,63 @@ const PreviewPanel: React.FC = () => {
     return () => window.removeEventListener('message', handleMessage);
   }, []);
 
+  // Listen for content script → background messages via chrome.runtime.onMessage
+  useEffect(() => {
+    const handleContentScriptMessage = (request: any, _sender: chrome.runtime.MessageSender, sendResponse: (response?: any) => void) => {
+      // Check if message is from our generated extension's content script
+      if (request && request._crxGeneratorMessage) {
+        const message = request.message;
+        console.log('[PreviewPanel] Received message from content script via chrome.runtime:', message);
+
+        // Forward message to sandbox iframe's background script
+        if (iframeRef.current?.contentWindow) {
+          const messageId = 'cs_' + Date.now() + '_' + Math.random();
+
+          // Send message to sandbox
+          iframeRef.current.contentWindow.postMessage({
+            type: 'CONTENT_TO_BACKGROUND',
+            messageId,
+            message
+          }, '*');
+
+          // Set up listener for response from sandbox
+          const responseHandler = (event: MessageEvent) => {
+            if (event.data && event.data.type === 'BACKGROUND_TO_CONTENT' && event.data.messageId === messageId) {
+              window.removeEventListener('message', responseHandler);
+              console.log('[PreviewPanel] Received response from background:', event.data.response);
+              sendResponse(event.data.response);
+            }
+          };
+
+          window.addEventListener('message', responseHandler);
+
+          // Timeout after 5 seconds
+          setTimeout(() => {
+            window.removeEventListener('message', responseHandler);
+            sendResponse({});
+          }, 5000);
+        } else {
+          sendResponse({});
+        }
+
+        return true; // Keep message channel open for async response
+      }
+    };
+
+    chrome.runtime.onMessage.addListener(handleContentScriptMessage);
+    return () => chrome.runtime.onMessage.removeListener(handleContentScriptMessage);
+  }, []);
+
+  // Track which tabs have content scripts injected to prevent duplicate injections
+  const injectedTabsRef = React.useRef<Set<number>>(new Set());
+
   useEffect(() => {
     console.log('PreviewPanel: generatedExtension changed', generatedExtension);
     generatedExtensionRef.current = generatedExtension;
+
+    // Clear injected tabs tracker when extension changes (new extension = re-inject)
+    injectedTabsRef.current.clear();
+
     if (generatedExtension && iframeRef.current) {
       // Inject content scripts into active tab if they exist
       injectContentScripts();
@@ -319,12 +473,19 @@ const PreviewPanel: React.FC = () => {
         return;
       }
 
+      // Check if already injected into this tab
+      if (injectedTabsRef.current.has(tab.id)) {
+        console.log('Content script already injected into tab:', tab.id);
+        return;
+      }
+
       console.log('Injecting content script into active tab:', tab.id);
+      injectedTabsRef.current.add(tab.id);
 
       // Wrap content script with Chrome API mock (same as in executeScript handler)
       const wrappedCode = `
 (function() {
-  // Set up chrome.runtime.onMessage for content scripts
+  // Set up chrome.runtime for content scripts
   if (!window.chrome) {
     window.chrome = {};
   }
@@ -332,7 +493,10 @@ const PreviewPanel: React.FC = () => {
     window.chrome.runtime = {};
   }
 
-  // Create message listener system
+  // Store reference to REAL Chrome API before we override it
+  const realChromeRuntimeSendMessage = window.chrome?.runtime?.sendMessage;
+
+  // Create message listener system (for receiving messages FROM popup/background)
   const messageListeners = [];
 
   window.chrome.runtime.onMessage = {
@@ -342,20 +506,66 @@ const PreviewPanel: React.FC = () => {
     }
   };
 
-  // Listen for messages from the extension
+  // sendMessage: Send messages TO background script
+  // Content scripts use a special marker so PreviewPanel can intercept via chrome.runtime.onMessage
+  window.chrome.runtime.sendMessage = function(message, callback) {
+    console.log('[Content Script] sendMessage called, using real Chrome API to reach Cr24 extension:', message);
+
+    // Wrap message with marker so PreviewPanel knows it's from generated extension
+    const wrappedMessage = {
+      _crxGeneratorMessage: true,
+      message: message
+    };
+
+    // Use REAL chrome.runtime.sendMessage (saved before override) to send to Cr24 extension
+    const promise = new Promise((resolve) => {
+      try {
+        if (realChromeRuntimeSendMessage) {
+          // This sends to Cr24 Extension Generator's runtime.onMessage listener
+          realChromeRuntimeSendMessage(wrappedMessage, (response) => {
+            console.log('[Content Script] Received response from Cr24 extension:', response);
+            resolve(response || {});
+          });
+        } else {
+          console.error('[Content Script] Real chrome.runtime.sendMessage not available');
+          resolve({});
+        }
+      } catch (err) {
+        console.error('[Content Script] Error sending message:', err);
+        resolve({});
+      }
+    });
+
+    if (callback) {
+      promise.then(callback);
+    }
+
+    return promise;
+  };
+
+  // Listen for messages from the popup (via postMessage bridge)
   window.addEventListener('message', function(event) {
     // Only accept messages from same origin with our marker
     if (event.source !== window || !event.data || event.data.source !== 'crx-generator-popup') {
       return;
     }
 
-    console.log('[Content Script] Received message:', event.data);
+    console.log('[Content Script] Received message from popup:', event.data);
     const message = event.data.message;
 
     // Call all registered listeners
+    // Track if any listener sent a response
+    let responseSent = false;
+
     messageListeners.forEach(listener => {
+      if (responseSent) return; // Only use first response
+
       try {
-        listener(message, {}, function(response) {
+        const returnValue = listener(message, {}, function(response) {
+          // Only send first response
+          if (responseSent) return;
+          responseSent = true;
+
           // Send response back
           console.log('[Content Script] Sending response:', response);
           window.postMessage({
@@ -364,13 +574,18 @@ const PreviewPanel: React.FC = () => {
             response: response
           }, '*');
         });
+
+        // If listener returned true, it means async response is coming
+        if (returnValue === true) {
+          // Wait for sendResponse to be called
+        }
       } catch (err) {
         console.error('[Content Script] Error in message listener:', err);
       }
     });
   });
 
-  console.log('[Content Script] Chrome API mock initialized');
+  console.log('[Content Script] Chrome API mock initialized (with sendMessage support)');
 
   // Execute the actual content script
   ${contentScriptFile}
@@ -614,26 +829,108 @@ ${html}
             });
           }
 
+          // Storage change listeners for chrome.storage.onChanged
+          const storageChangeListeners = [];
+
           // Create Chrome API that bridges to parent
           window.chrome = {
             storage: {
               local: {
                 get: function(keys, callback) {
-                  callParentChromeAPI('storage.local', 'get', [keys])
-                    .then(result => callback && callback(result))
-                    .catch(err => console.error('storage.local.get error:', err));
+                  const promise = callParentChromeAPI('storage.local', 'get', [keys]);
+                  if (callback) {
+                    promise
+                      .then(result => callback(result))
+                      .catch(err => console.error('storage.local.get error:', err));
+                  }
+                  return promise; // Support Promise-based API
                 },
                 set: function(items, callback) {
-                  callParentChromeAPI('storage.local', 'set', [items])
-                    .then(() => callback && callback())
-                    .catch(err => console.error('storage.local.set error:', err));
+                  const promise = callParentChromeAPI('storage.local', 'set', [items])
+                    .then(() => {
+                      // Emit storage change events
+                      const changes = {};
+                      for (const key in items) {
+                        changes[key] = { newValue: items[key] };
+                      }
+                      storageChangeListeners.forEach(listener => {
+                        try {
+                          listener(changes, 'local');
+                        } catch (e) {
+                          console.error('storage.onChanged listener error:', e);
+                        }
+                      });
+                    });
+                  if (callback) {
+                    promise
+                      .then(() => callback())
+                      .catch(err => console.error('storage.local.set error:', err));
+                  }
+                  return promise; // Support Promise-based API
+                }
+              },
+              onChanged: {
+                addListener: function(callback) {
+                  storageChangeListeners.push(callback);
+                  console.log('[Preview] storage.onChanged listener registered');
+                },
+                removeListener: function(callback) {
+                  const index = storageChangeListeners.indexOf(callback);
+                  if (index > -1) {
+                    storageChangeListeners.splice(index, 1);
+                  }
                 }
               }
             },
             runtime: {
-              sendMessage: function(message, callback) {
-                console.log('chrome.runtime.sendMessage not bridged yet');
-                if (callback) callback({});
+              sendMessage: async function(message, callback) {
+                console.log('[Preview] chrome.runtime.sendMessage called:', message);
+
+                // Get registered background listeners
+                const listeners = window.__backgroundMessageListeners || [];
+
+                if (listeners.length === 0) {
+                  console.warn('[Preview] No background message listeners registered');
+                  if (callback) callback({});
+                  return Promise.resolve({});
+                }
+
+                // Call all listeners (mimic Chrome's behavior)
+                let response = {};
+                for (const listener of listeners) {
+                  try {
+                    const result = await new Promise((resolve) => {
+                      const sendResponse = (resp) => resolve(resp);
+                      const returnValue = listener(message, {}, sendResponse);
+                      // If listener doesn't return true, it means it's sync
+                      if (returnValue !== true) {
+                        resolve({});
+                      }
+                    });
+                    response = result;
+                  } catch (e) {
+                    console.error('[Preview] Background listener error:', e);
+                    window.chrome.runtime.lastError = { message: e.message };
+                  }
+                }
+
+                if (callback) callback(response);
+                return response;
+              },
+              onMessage: {
+                addListener: function(callback) {
+                  console.log('[Preview] runtime.onMessage.addListener called (popup side)');
+                  // Popup-side listener (not typically used, but support it)
+                  if (!window.__popupMessageListeners) window.__popupMessageListeners = [];
+                  window.__popupMessageListeners.push(callback);
+                }
+              },
+              onInstalled: {
+                addListener: function(callback) {
+                  console.log('[Preview] runtime.onInstalled.addListener called');
+                  // Execute immediately in preview (simulate fresh install)
+                  setTimeout(() => callback({ reason: 'install' }), 0);
+                }
               },
               lastError: null
             },
@@ -673,8 +970,264 @@ ${html}
                   throw err;
                 }
               }
+            },
+            action: {
+              setBadgeText: function(details, callback) {
+                console.log('[Preview] Badge text:', details.text);
+                // Future: Could display badge visually in preview UI
+                if (callback) callback();
+                return Promise.resolve();
+              },
+              setBadgeBackgroundColor: function(details, callback) {
+                console.log('[Preview] Badge color:', details.color);
+                if (callback) callback();
+                return Promise.resolve();
+              }
+            },
+            notifications: {
+              create: async function(arg1, arg2, callback) {
+                // Handle both signatures: (id, options, callback) and (options, callback)
+                const isIdProvided = typeof arg1 === 'string';
+                const notificationId = isIdProvided ? arg1 : undefined;
+                const options = isIdProvided ? arg2 : arg1;
+                const cb = typeof arg2 === 'function' ? arg2 : callback;
+
+                try {
+                  // Send correct args based on signature
+                  const args = isIdProvided ? [notificationId, options] : [options];
+                  const result = await callParentChromeAPI('notifications', 'create', args);
+                  if (cb) cb(result);
+                  return result;
+                } catch (err) {
+                  console.error('notifications.create error:', err);
+                  if (cb) cb();
+                }
+              },
+              clear: async function(notificationId, callback) {
+                try {
+                  const result = await callParentChromeAPI('notifications', 'clear', [notificationId]);
+                  if (callback) callback(result);
+                  return result;
+                } catch (err) {
+                  console.error('notifications.clear error:', err);
+                  if (callback) callback(false);
+                }
+              },
+              getAll: async function(callback) {
+                try {
+                  const result = await callParentChromeAPI('notifications', 'getAll', []);
+                  if (callback) callback(result);
+                  return result;
+                } catch (err) {
+                  console.error('notifications.getAll error:', err);
+                  if (callback) callback({});
+                }
+              }
+            },
+            contextMenus: {
+              create: function(createProperties, callback) {
+                try {
+                  const result = callParentChromeAPI('contextMenus', 'create', [createProperties]);
+                  if (callback) {
+                    result.then(() => callback()).catch(err => {
+                      console.error('contextMenus.create error:', err);
+                      callback();
+                    });
+                  }
+                  return result;
+                } catch (err) {
+                  console.error('contextMenus.create error:', err);
+                  if (callback) callback();
+                }
+              },
+              update: async function(id, updateProperties, callback) {
+                try {
+                  await callParentChromeAPI('contextMenus', 'update', [id, updateProperties]);
+                  if (callback) callback();
+                } catch (err) {
+                  console.error('contextMenus.update error:', err);
+                  if (callback) callback();
+                }
+              },
+              remove: async function(menuItemId, callback) {
+                try {
+                  await callParentChromeAPI('contextMenus', 'remove', [menuItemId]);
+                  if (callback) callback();
+                } catch (err) {
+                  console.error('contextMenus.remove error:', err);
+                  if (callback) callback();
+                }
+              },
+              removeAll: async function(callback) {
+                try {
+                  await callParentChromeAPI('contextMenus', 'removeAll', []);
+                  if (callback) callback();
+                } catch (err) {
+                  console.error('contextMenus.removeAll error:', err);
+                  if (callback) callback();
+                }
+              }
+            },
+            downloads: {
+              download: async function(options, callback) {
+                try {
+                  const result = await callParentChromeAPI('downloads', 'download', [options]);
+                  if (callback) callback(result);
+                  return result;
+                } catch (err) {
+                  console.error('downloads.download error:', err);
+                  if (callback) callback();
+                }
+              },
+              search: async function(query, callback) {
+                try {
+                  const result = await callParentChromeAPI('downloads', 'search', [query]);
+                  if (callback) callback(result);
+                  return result;
+                } catch (err) {
+                  console.error('downloads.search error:', err);
+                  if (callback) callback([]);
+                }
+              },
+              pause: async function(downloadId, callback) {
+                try {
+                  await callParentChromeAPI('downloads', 'pause', [downloadId]);
+                  if (callback) callback();
+                } catch (err) {
+                  console.error('downloads.pause error:', err);
+                  if (callback) callback();
+                }
+              },
+              resume: async function(downloadId, callback) {
+                try {
+                  await callParentChromeAPI('downloads', 'resume', [downloadId]);
+                  if (callback) callback();
+                } catch (err) {
+                  console.error('downloads.resume error:', err);
+                  if (callback) callback();
+                }
+              },
+              cancel: async function(downloadId, callback) {
+                try {
+                  await callParentChromeAPI('downloads', 'cancel', [downloadId]);
+                  if (callback) callback();
+                } catch (err) {
+                  console.error('downloads.cancel error:', err);
+                  if (callback) callback();
+                }
+              }
+            },
+            alarms: {
+              create: function(nameOrAlarmInfo, alarmInfo) {
+                const name = typeof nameOrAlarmInfo === 'string' ? nameOrAlarmInfo : undefined;
+                const info = typeof nameOrAlarmInfo === 'string' ? alarmInfo : nameOrAlarmInfo;
+                callParentChromeAPI('alarms', 'create', [name, info])
+                  .catch(err => console.error('alarms.create error:', err));
+              },
+              get: async function(name, callback) {
+                try {
+                  const result = await callParentChromeAPI('alarms', 'get', [name]);
+                  if (callback) callback(result);
+                  return result;
+                } catch (err) {
+                  console.error('alarms.get error:', err);
+                  if (callback) callback();
+                }
+              },
+              getAll: async function(callback) {
+                try {
+                  const result = await callParentChromeAPI('alarms', 'getAll', []);
+                  if (callback) callback(result);
+                  return result;
+                } catch (err) {
+                  console.error('alarms.getAll error:', err);
+                  if (callback) callback([]);
+                }
+              },
+              clear: async function(name, callback) {
+                try {
+                  const result = await callParentChromeAPI('alarms', 'clear', [name]);
+                  if (callback) callback(result);
+                  return result;
+                } catch (err) {
+                  console.error('alarms.clear error:', err);
+                  if (callback) callback(false);
+                }
+              },
+              clearAll: async function(callback) {
+                try {
+                  const result = await callParentChromeAPI('alarms', 'clearAll', []);
+                  if (callback) callback(result);
+                  return result;
+                } catch (err) {
+                  console.error('alarms.clearAll error:', err);
+                  if (callback) callback(false);
+                }
+              },
+              onAlarm: {
+                addListener: function(callback) {
+                  console.log('[Preview] alarms.onAlarm listener registered (not functional in preview)');
+                  // Note: Alarm events cannot be fully simulated in preview
+                }
+              }
             }
           };
+
+          // Listen for content script → background messages from parent
+          window.addEventListener('message', async function(event) {
+            if (event.data && event.data.type === 'CONTENT_TO_BACKGROUND') {
+              console.log('[Sandbox] Received message from content script:', event.data.message);
+              const { messageId, message } = event.data;
+
+              try {
+                // Get registered background listeners
+                const listeners = window.__backgroundMessageListeners || [];
+
+                if (listeners.length === 0) {
+                  console.warn('[Sandbox] No background message listeners registered');
+                  window.parent.postMessage({
+                    type: 'BACKGROUND_TO_CONTENT',
+                    messageId,
+                    response: {}
+                  }, '*');
+                  return;
+                }
+
+                // Call all listeners (mimic Chrome's behavior)
+                let response = {};
+                for (const listener of listeners) {
+                  try {
+                    const result = await new Promise((resolve) => {
+                      const sendResponse = (resp) => resolve(resp);
+                      const returnValue = listener(message, { tab: { id: 1 } }, sendResponse);
+                      // If listener doesn't return true, it means it's sync
+                      if (returnValue !== true) {
+                        resolve({});
+                      }
+                    });
+                    response = result;
+                  } catch (e) {
+                    console.error('[Sandbox] Background listener error:', e);
+                  }
+                }
+
+                // Send response back to parent
+                console.log('[Sandbox] Sending response back to content script:', response);
+                window.parent.postMessage({
+                  type: 'BACKGROUND_TO_CONTENT',
+                  messageId,
+                  response
+                }, '*');
+              } catch (error) {
+                console.error('[Sandbox] Error handling content script message:', error);
+                window.parent.postMessage({
+                  type: 'BACKGROUND_TO_CONTENT',
+                  messageId,
+                  response: {}
+                }, '*');
+              }
+            }
+          });
 
           console.log('Chrome API bridge ready');
         </script>
@@ -697,17 +1250,91 @@ ${html}
         }
       }
 
+      // Inject background.js FIRST (if exists) - runs before popup.js
+      if (generatedExtension.files['background.js'] || generatedExtension.files['service_worker.js']) {
+        const backgroundScript = generatedExtension.files['background.js'] || generatedExtension.files['service_worker.js'];
+
+        // Wrap background script to register message listeners globally
+        const wrappedBackgroundScript = `
+<script>
+(function() {
+  console.log('[Preview] Executing background script...');
+
+  // Initialize global listener registry
+  window.__backgroundMessageListeners = [];
+
+  // Wrap chrome.runtime.onMessage.addListener to register listeners
+  const originalOnMessage = window.chrome.runtime.onMessage;
+  window.chrome.runtime.onMessage = {
+    addListener: function(callback) {
+      console.log('[Preview] Background script registered message listener');
+      window.__backgroundMessageListeners.push(callback);
+    },
+    removeListener: function(callback) {
+      const index = window.__backgroundMessageListeners.indexOf(callback);
+      if (index > -1) window.__backgroundMessageListeners.splice(index, 1);
+    }
+  };
+
+  // Execute background script
+  ${backgroundScript}
+
+  console.log('[Preview] Background script executed, listeners:', window.__backgroundMessageListeners.length);
+})();
+</script>
+        `;
+
+        // Inject background script in head (executes immediately)
+        if (html.includes('</head>')) {
+          html = html.replace('</head>', `${wrappedBackgroundScript}</head>`);
+        } else {
+          html = wrappedBackgroundScript + html;
+        }
+      }
+
       // Inject JS if exists
       if (generatedExtension.files['popup.js']) {
-        // Wrap in DOMContentLoaded to ensure DOM is ready (mimics defer behavior)
+        let jsCode = generatedExtension.files['popup.js'];
+
+        // Check if the code has its own DOMContentLoaded listener
+        const hasDOMContentLoaded = /document\.addEventListener\s*\(\s*['"]DOMContentLoaded['"]/.test(jsCode);
+
+        if (hasDOMContentLoaded) {
+          // Replace DOMContentLoaded with immediate execution when DOM is ready
+          // This prevents double-wrapping: our wrapper + their listener = listener never fires
+
+          // Case 1: Arrow function - document.addEventListener('DOMContentLoaded', async () => { ... });
+          jsCode = jsCode.replace(
+            /document\.addEventListener\s*\(\s*['"]DOMContentLoaded['"]\s*,\s*(async\s+)?\(\s*\)\s*=>\s*\{/g,
+            (_match, asyncKeyword) => {
+              // Replace with IIFE that executes immediately if DOM is ready
+              return `(${asyncKeyword || ''}() => {`;
+            }
+          );
+
+          // Case 2: Named function reference - document.addEventListener('DOMContentLoaded', functionName);
+          jsCode = jsCode.replace(
+            /document\.addEventListener\s*\(\s*['"]DOMContentLoaded['"]\s*,\s*(\w+)\s*\)\s*;?/g,
+            (_match, functionName) => {
+              // Replace with immediate function call
+              return `${functionName}();`;
+            }
+          );
+
+          // Also need to close the listener properly - remove the closing }); for addEventListener (Case 1 only)
+          // Match: }); or }));  at the end (handling both cases with/without extra parens)
+          jsCode = jsCode.replace(/\}\s*\)\s*;?\s*$/g, '})();');
+        }
+
+        // Wrap in DOMContentLoaded check to ensure DOM is ready (mimics defer behavior)
         const wrappedJS = `
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', function() {
-    ${generatedExtension.files['popup.js']}
+    ${jsCode}
   });
 } else {
-  // DOM already loaded
-  ${generatedExtension.files['popup.js']}
+  // DOM already loaded, execute immediately
+  ${jsCode}
 }
 `;
         const scriptTag = `<script>${wrappedJS}</script>`;
@@ -733,71 +1360,6 @@ if (document.readyState === 'loading') {
         // Sandbox already loaded, send HTML directly
         // Use small timeout to ensure contentWindow is ready
         setTimeout(() => sendToSandbox(html), 50);
-      }
-    } else if (generatedExtension.files['content.js']) {
-      // Render content script on demo page
-      const demoHTML = `
-        <!DOCTYPE html>
-        <html>
-          <head>
-            <meta charset="UTF-8">
-            <title>Demo Page</title>
-            <style>
-              body {
-                font-family: Arial, sans-serif;
-                padding: 20px;
-                line-height: 1.6;
-              }
-              h1 { color: #333; }
-              p { margin: 10px 0; }
-            </style>
-          </head>
-          <body>
-            <h1>Demo Web Page</h1>
-            <p>This is a sample web page to demonstrate the content script.</p>
-            <p>Lorem ipsum dolor sit amet, consectetur adipiscing elit.</p>
-            <div id="demo-content">
-              <p>Content scripts will inject code into this page.</p>
-            </div>
-            <script>
-              // Simulate Chrome API for content scripts
-              window.chrome = {
-                runtime: {
-                  sendMessage: (msg) => console.log('Message sent:', msg),
-                  onMessage: {
-                    addListener: (callback) => console.log('Listener added')
-                  }
-                },
-                storage: {
-                  local: {
-                    get: (keys, callback) => callback({}),
-                    set: (items, callback) => callback && callback()
-                  }
-                }
-              };
-
-              // Inject content script
-              ${generatedExtension.files['content.js']}
-            </script>
-          </body>
-        </html>
-      `;
-
-      // Load sandbox page and send demo HTML via postMessage
-      if (!iframe.src || !iframe.src.includes('sandbox.html')) {
-        iframe.src = chrome.runtime.getURL('sandbox.html');
-        // Wait for sandbox to be ready
-        const handleMessage = (event: MessageEvent) => {
-          if (event.data.type === 'SANDBOX_READY') {
-            window.removeEventListener('message', handleMessage);
-            sendToSandbox(demoHTML);
-          }
-        };
-        window.addEventListener('message', handleMessage);
-      } else {
-        // Sandbox already loaded, send HTML directly
-        // Use small timeout to ensure contentWindow is ready
-        setTimeout(() => sendToSandbox(demoHTML), 50);
       }
     }
   };
