@@ -48,6 +48,219 @@ The application uses React Context for state management with two main providers:
    - Manages light/dark mode
    - Persists theme preference to Chrome storage
 
+### Context-Aware Extension Generation (Phase 2)
+
+**NEW FEATURE**: The system can now generate hyper-specific extensions based on the current webpage's structure and content.
+
+#### How It Works
+
+1. **Page Context Capture** (`src/utils/pageContext.ts`)
+   - User clicks "📄 Include Current Page Context" button in ChatPanel
+   - Injects script into active tab to extract page information:
+     - URL and title
+     - First 3000 chars of HTML (structure analysis)
+     - Visible text (first 3000 chars)
+     - Headings (h1, h2, h3)
+     - Page statistics (link count, heading count, has login form, has search box)
+     - Top 20 most common CSS classes and IDs
+   - Returns summarized PageContext object (~1500 tokens)
+
+2. **Smart Prompt Suggestions** (`suggestPrompts()`)
+   - Analyzes captured page context to suggest relevant prompts
+   - Site-specific suggestions:
+     - **LinkedIn jobs**: "Extract all job listings to CSV", "Track which jobs I've already viewed"
+     - **Amazon products**: "Track price changes for this product", "Compare prices with other sellers"
+     - **Twitter/X**: "Extract all tweets to JSON", "Auto-like tweets containing specific keywords"
+     - **GitHub**: "Export all repository links on this page", "Highlight repositories by programming language"
+     - **Reddit**: "Extract all post titles and links", "Filter posts by upvote count"
+     - **YouTube**: "Extract video titles and descriptions", "Track view counts"
+   - Generic suggestions based on page features:
+     - Has search box → "Auto-fill the search box with saved queries"
+     - Has login form → "Auto-fill login credentials securely"
+     - Many links → "Extract all links from this page to CSV"
+
+3. **Enhanced System Prompt**
+   - When page context is enabled, adds ~1500 tokens to system prompt with:
+     - Current webpage URL and title
+     - HTML structure sample (first 3000 chars)
+     - Key elements (headings, stats)
+     - Top 10 CSS classes (e.g., `.job-card-container`, `.product-title`)
+     - Top 10 element IDs (e.g., `#priceblock_ourprice`, `#search-box`)
+     - Page text sample (first 500 chars)
+     - **Context-aware instructions**:
+       - "Generate selectors that work specifically for THIS page structure"
+       - "Use exact class names and IDs you see in the HTML above"
+       - "Make the extension hyper-targeted to this website"
+       - "Set manifest 'matches' to specifically target this domain"
+
+4. **AI Generation with Context**
+   - AI receives both the base system prompt (~2,500 tokens) AND the page context (~1,500 tokens)
+   - Total prompt: ~4,000 tokens (still well under most model limits)
+   - AI generates extension with:
+     - **Exact selectors** from the actual page (e.g., `document.querySelector('.job-card-list__title')`)
+     - **Domain-specific manifest matches** (e.g., `["*://*.linkedin.com/*"]`)
+     - **Data extraction** tailored to page structure
+     - **Realistic functionality** based on what's actually on the page
+
+#### UI Components
+
+**Page Context Section** (in ChatPanel, below messages):
+- **Capture Button**: `📄 Include Current Page Context` - Dashed border, appears when no context captured
+- **Context Preview Card**: Shows when context is captured
+  - Favicon + Page Title + Hostname
+  - Remove button (×) to clear context
+  - Suggested prompts section with 3 clickable prompt buttons
+- **Input Placeholder**: Changes to "Describe what you want to do with this page..." when context is active
+
+#### Example: LinkedIn Job Scraper
+
+**User Action**:
+1. Opens LinkedIn job search results page
+2. Clicks "📄 Include Current Page Context"
+3. Sees suggested prompts:
+   - "Extract all job listings to CSV"
+   - "Highlight jobs matching specific keywords"
+   - "Track which jobs I've already viewed"
+4. Clicks first suggestion (or types custom prompt)
+
+**What AI Receives**:
+```
+[Base system prompt: 2,500 tokens]
+
+🌐 CURRENT WEBPAGE CONTEXT:
+URL: https://www.linkedin.com/jobs/search/?keywords=software%20engineer
+Title: Software Engineer Jobs | LinkedIn
+
+Page Structure (first 3000 chars):
+<div class="jobs-search__results-list">
+  <div class="job-card-container">
+    <h3 class="job-card-list__title">Senior Software Engineer</h3>
+    <h4 class="job-card-container__company-name">Google</h4>
+    ...
+
+Top CSS Classes:
+  .jobs-search__results-list
+  .job-card-container
+  .job-card-list__title
+  .job-card-container__company-name
+  ...
+
+CONTEXT-AWARE INSTRUCTIONS:
+- Use exact class names and IDs from the HTML above
+- Set manifest "matches" to ["*://*.linkedin.com/*"]
+- Extract data that's actually present on this page
+```
+
+**What AI Generates**:
+```javascript
+// content.js - HYPER-SPECIFIC to LinkedIn
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg.action === 'extractJobs') {
+    // Uses EXACT selectors from page context
+    const jobCards = document.querySelectorAll('.job-card-container');
+    const jobs = Array.from(jobCards).map(card => ({
+      title: card.querySelector('.job-card-list__title')?.textContent.trim(),
+      company: card.querySelector('.job-card-container__company-name')?.textContent.trim()
+    }));
+
+    // Generate CSV
+    const csv = 'Title,Company\n' + jobs.map(j => `"${j.title}","${j.company}"`).join('\n');
+
+    // Download
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'linkedin-jobs.csv';
+    a.click();
+  }
+});
+```
+
+**manifest.json** (domain-specific):
+```json
+{
+  "content_scripts": [{
+    "matches": ["*://*.linkedin.com/*"],
+    "js": ["content.js"]
+  }]
+}
+```
+
+#### Benefits Over Generic Extensions
+
+**Without Page Context** (Generic):
+- AI guesses common patterns: "Try `.job-title` or `.position-name`"
+- May not work if selectors don't match
+- User has to manually inspect page and regenerate
+
+**With Page Context** (Context-Aware):
+- AI knows exact selectors: `.job-card-list__title` (from actual HTML)
+- Works immediately on first generation
+- Tailored to specific site structure
+- Domain-restricted for better performance
+
+#### Required Permissions
+
+Added to `manifest.json`:
+```json
+{
+  "permissions": [
+    "tabs",        // NEW - Access tab URL and inject scripts
+    "scripting",   // Already present - Inject content scripts
+    ...
+  ],
+  "host_permissions": [
+    "<all_urls>"   // NEW - Capture content from any webpage
+  ]
+}
+```
+
+**Why `<all_urls>`?**
+- Page context capture needs to inject scripts into any webpage user visits
+- Without this, capture would fail on most sites
+- User grants permission when installing extension
+
+#### Privacy Considerations
+
+- Page HTML is sent to OpenAI API (user should be aware)
+- Only first 3000 chars of HTML sent (summarized, not full page)
+- No passwords or sensitive form data captured (just structure)
+- Page context is NOT stored persistently (only in memory during session)
+- User can remove context at any time (× button)
+
+#### Token Usage Impact
+
+- Base system prompt: ~2,500 tokens
+- Page context addition: ~1,500 tokens
+- **Total**: ~4,000 tokens (well under limits)
+- Completion tokens: ~10,000 (same as before)
+- **Total API cost**: Slightly higher due to longer prompt, but minimal impact
+
+#### Limitations
+
+1. **Dynamic Content**: Captures initial HTML, not content loaded via JavaScript after delay
+   - Solution: User can regenerate after page fully loads
+2. **Site Changes**: If site updates HTML structure, generated extension may break
+   - Solution: User can recapture context and regenerate
+3. **Privacy**: Page HTML sent to OpenAI
+   - Solution: User controls when to enable context (opt-in per message)
+
+#### Technical Implementation
+
+**File Structure**:
+- `src/utils/pageContext.ts`: Capture and summarization logic
+- `src/types/index.ts`: PageContext interface
+- `src/context/ChatContext.tsx`: Enhanced system prompt builder
+- `src/components/ChatPanel.tsx`: UI components and event handlers
+- `src/styles/ChatPanel.css`: Styling for context preview
+
+**Key Functions**:
+- `capturePageContent()`: Injects script, extracts page data, returns PageContext
+- `summarizePageContent()`: Reduces HTML to first 3000 chars, extracts top selectors
+- `extractMainSelectors()`: Finds most common CSS classes and IDs
+- `suggestPrompts(pageContext)`: Returns 3 context-aware prompt suggestions
+
 ### OpenAI Integration Flow
 
 1. User sends message via ChatPanel
