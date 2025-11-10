@@ -364,25 +364,28 @@ CONTEXT-AWARE INSTRUCTIONS:
         requestBody.max_tokens = 4000; // GPT-3.5-turbo and others: 4096 max
       }
 
-      const response = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${settings.apiKey}`,
-        },
-        body: JSON.stringify(requestBody),
-        signal: controller.signal,
+      // Send API request to background script (persists even if popup closes)
+      const bgResponse = await chrome.runtime.sendMessage({
+        type: 'GENERATE_EXTENSION',
+        payload: {
+          apiKey: settings.apiKey,
+          model: settings.model,
+          temperature: effectiveTemperature,
+          messages: allMessages,
+          requestBody: requestBody,
+        }
       });
 
       clearTimeout(timeoutId);
 
-      console.log('OpenAI response status:', response.status);
+      console.log('Background script response:', bgResponse);
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        console.error('OpenAI API error:', errorData);
-        throw new Error(errorData.error?.message || 'API request failed');
+      if (!bgResponse.success) {
+        console.error('OpenAI API error:', bgResponse.error);
+        throw new Error(bgResponse.error || 'API request failed');
       }
+
+      const data = bgResponse.data;
 
       let accumulatedContent = '';
 
@@ -472,15 +475,14 @@ CONTEXT-AWARE INSTRUCTIONS:
         progressIntervals.push(timeoutId);
       });
 
-      // Wait for API response
-      const data = await response.json();
+      // Data already received from background script (no need to parse JSON)
       console.log('OpenAI response:', data);
 
       // Extract token usage from API response
       const tokenUsage = data.usage ? {
-        promptTokens: data.usage.prompt_tokens,
-        completionTokens: data.usage.completion_tokens,
-        totalTokens: data.usage.total_tokens
+        promptTokens: data.usage.prompt_tokens || data.usage.promptTokens,
+        completionTokens: data.usage.completion_tokens || data.usage.completionTokens,
+        totalTokens: data.usage.total_tokens || data.usage.totalTokens
       } : undefined;
 
       if (tokenUsage) {
@@ -490,13 +492,8 @@ CONTEXT-AWARE INSTRUCTIONS:
         console.log(`   Total: ${tokenUsage.totalTokens} tokens`);
       }
 
-      // Check if response was truncated due to token limit
-      const finishReason = data.choices[0].finish_reason;
-      if (finishReason === 'length') {
-        console.warn('⚠️ Response truncated due to token limit. Consider increasing max_completion_tokens.');
-      }
-
-      accumulatedContent = data.choices[0].message.content || '';
+      // Extract content from background script response
+      accumulatedContent = data.content || '';
 
       if (!accumulatedContent) {
         throw new Error('Empty response from OpenAI API. The model may have hit token limits or encountered an error.');
