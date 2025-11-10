@@ -243,32 +243,50 @@
 
 /* Page Context Section */
 .page-context-section {
-  padding: var(--spacing-sm);
+  padding: var(--spacing-xs) var(--spacing-sm);
   background-color: var(--bg-primary);
   border-top: 1px solid var(--border-color);
 }
 
-.capture-page-button {
-  width: 100%;
-  padding: 10px var(--spacing-md);
+.context-toggle-button {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-sm);
   background-color: var(--bg-secondary);
-  color: var(--text-primary);
-  border: 1px dashed var(--border-color);
-  border-radius: var(--radius-md);
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all var(--transition-base);
+  color: var(--text-secondary);
+  font-size: 16px;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: var(--spacing-xs);
+  transition: all var(--transition-base);
+  border: 1px solid var(--border-color);
+  cursor: pointer;
+  flex-shrink: 0;
+  opacity: 0.7;
 }
 
-.capture-page-button:hover {
+.context-toggle-button:hover:not(:disabled) {
   background-color: var(--bg-tertiary);
   border-color: var(--accent-color);
-  color: var(--accent-color);
+  opacity: 1;
+  transform: scale(1.05);
+}
+
+.context-toggle-button.active {
+  background-color: var(--accent-color);
+  color: white;
+  border-color: var(--accent-color);
+  opacity: 1;
+}
+
+.context-toggle-button.active:hover:not(:disabled) {
+  background-color: var(--primary-hover);
+  transform: scale(1.05);
+}
+
+.context-toggle-button:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
 }
 
 .page-context-preview {

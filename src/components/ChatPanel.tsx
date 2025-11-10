@@ -201,13 +201,9 @@ const ChatPanel: React.FC = () => {
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Page Context Section */}
-      <div className="page-context-section">
-        {!pageContext ? (
-          <button className="capture-page-button" onClick={handleCapturePageContext}>
-            📄 Include Current Page Context
-          </button>
-        ) : (
+      {/* Page Context Preview - Only shown when context is captured */}
+      {pageContext && (
+        <div className="page-context-section">
           <div className="page-context-preview">
             <div className="page-context-header">
               {pageContext.favicon && <img src={pageContext.favicon} alt="" className="page-favicon" />}
@@ -237,10 +233,18 @@ const ChatPanel: React.FC = () => {
               </div>
             )}
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
       <div className="input-container">
+        <button
+          className={`context-toggle-button ${pageContext ? 'active' : ''}`}
+          onClick={pageContext ? handleRemovePageContext : handleCapturePageContext}
+          title={pageContext ? 'Remove page context' : 'Include current page context'}
+          disabled={isLoading}
+        >
+          📄
+        </button>
         <textarea
           className="chat-input"
           value={input}
