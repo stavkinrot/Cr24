@@ -104,24 +104,36 @@ The application uses React Context for state management with two main providers:
 
 #### UI Components
 
-**Page Context Section** (in ChatPanel, below messages):
-- **Capture Button**: `📄 Include Current Page Context` - Dashed border, appears when no context captured
-- **Context Preview Card**: Shows when context is captured
+**Context Toggle Button** (in input area, left of textarea):
+- **Icon**: Document/page SVG icon (18×18px, stroke-based, matches header icon style)
+- **States**:
+  - Inactive: Gray color, transparent background
+  - Hover: Accent blue color, subtle gray background, scales 1.1x
+  - Active: Accent blue color (when context is captured)
+- **Tooltip**: "Include active tab context" / "Remove active tab context"
+- **Location**: Inside input container, left side of textarea
+
+**Page Context Preview Card** (appears between messages and input when context captured):
+- **Header**:
   - Favicon + Page Title + Hostname
   - Remove button (×) to clear context
-  - Suggested prompts section with 3 clickable prompt buttons
+- **Suggested Prompts**: Horizontal scrollable pills
+  - 3 context-aware suggestions
+  - Compact design (6px padding, 11px font)
+  - Rounded pills with hover effects
+  - Horizontally scrollable if needed
 - **Input Placeholder**: Changes to "Describe what you want to do with this page..." when context is active
 
 #### Example: LinkedIn Job Scraper
 
 **User Action**:
 1. Opens LinkedIn job search results page
-2. Clicks "📄 Include Current Page Context"
-3. Sees suggested prompts:
+2. Clicks document icon button (left of input area)
+3. Page context preview appears with suggested prompts:
    - "Extract all job listings to CSV"
    - "Highlight jobs matching specific keywords"
    - "Track which jobs I've already viewed"
-4. Clicks first suggestion (or types custom prompt)
+4. Clicks first suggestion pill (or types custom prompt)
 
 **What AI Receives**:
 ```
@@ -252,14 +264,21 @@ Added to `manifest.json`:
 - `src/utils/pageContext.ts`: Capture and summarization logic
 - `src/types/index.ts`: PageContext interface
 - `src/context/ChatContext.tsx`: Enhanced system prompt builder
-- `src/components/ChatPanel.tsx`: UI components and event handlers
-- `src/styles/ChatPanel.css`: Styling for context preview
+- `src/components/ChatPanel.tsx`: UI components and event handlers (SVG icon, toggle button, preview card)
+- `src/styles/ChatPanel.css`: Styling for context preview, toggle button, scrollable pills
 
 **Key Functions**:
 - `capturePageContent()`: Injects script, extracts page data, returns PageContext
 - `summarizePageContent()`: Reduces HTML to first 3000 chars, extracts top selectors
 - `extractMainSelectors()`: Finds most common CSS classes and IDs
 - `suggestPrompts(pageContext)`: Returns 3 context-aware prompt suggestions
+
+**UI/UX Details**:
+- **Icon**: Document/page SVG (matches header icon style: stroke-based, 18×18px, 2px stroke width)
+- **Toggle Button**: Inside input area (left side), no separate section above input
+- **Preview Card**: Only appears when context is captured (not permanently visible)
+- **Suggested Prompts**: Horizontal scrollable pills (not vertical list)
+- **Textarea**: Hidden scrollbar (scrollable with mouse wheel, no visual scrollbar)
 
 ### OpenAI Integration Flow
 
