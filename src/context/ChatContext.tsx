@@ -32,31 +32,6 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [pageContext, setPageContext] = useState<PageContext | null>(null);
 
   useEffect(() => {
-    // Check for pending responses from background script
-    const checkPendingResponses = async () => {
-      const result = await chrome.storage.local.get(['pendingResponses']);
-      if (result.pendingResponses && currentChat) {
-        const pendingResponse = result.pendingResponses[currentChat.id];
-        if (pendingResponse) {
-          console.log('[ChatContext] Found pending response for chat:', currentChat.id);
-
-          // Process the pending response
-          await processPendingResponse(pendingResponse);
-
-          // Clear the pending response
-          const updatedPending = { ...result.pendingResponses };
-          delete updatedPending[currentChat.id];
-          await chrome.storage.local.set({ pendingResponses: updatedPending });
-        }
-      }
-    };
-
-    if (currentChat) {
-      checkPendingResponses();
-    }
-  }, [currentChat?.id]);
-
-  useEffect(() => {
     // Load data from chrome storage
     chrome.storage.local.get(['chats', 'currentChatId', 'settings'], (result) => {
       if (result.chats && result.chats.length > 0) {
@@ -135,88 +110,6 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setCurrentChat(updatedChats[0] || null);
     }
     chrome.storage.local.set({ chats: updatedChats });
-  };
-
-  const processPendingResponse = async (pendingResponse: any) => {
-    if (!currentChat) return;
-
-    console.log('[ChatContext] Processing pending response');
-
-    // Find the last assistant message (the one that was generating)
-    const lastMessage = currentChat.messages[currentChat.messages.length - 1];
-    if (lastMessage && lastMessage.role === 'assistant' && lastMessage.isGenerating) {
-      // This is the message that needs to be updated with the response
-      if (pendingResponse.success) {
-        const data = pendingResponse.data;
-
-        // Extract content
-        const content = data.content || '';
-
-        // Extract token usage
-        const tokenUsage = data.usage ? {
-          promptTokens: data.usage.prompt_tokens || data.usage.promptTokens,
-          completionTokens: data.usage.completion_tokens || data.usage.completionTokens,
-          totalTokens: data.usage.total_tokens || data.usage.totalTokens
-        } : undefined;
-
-        // Update the message
-        const updatedMessage: Message = {
-          ...lastMessage,
-          content,
-          isGenerating: false,
-          progressStage: undefined,
-          tokenUsage,
-        };
-
-        const updatedMessages = currentChat.messages.map(m =>
-          m.id === lastMessage.id ? updatedMessage : m
-        );
-
-        const updatedChat = {
-          ...currentChat,
-          messages: updatedMessages,
-          updatedAt: Date.now(),
-        };
-
-        setCurrentChat(updatedChat);
-
-        const updatedChats = chats.map((c) =>
-          c.id === currentChat.id ? updatedChat : c
-        );
-        setChats(updatedChats);
-        chrome.storage.local.set({ chats: updatedChats });
-
-        console.log('[ChatContext] Updated message with pending response');
-      } else {
-        // Handle error
-        console.error('[ChatContext] Pending response had error:', pendingResponse.error);
-
-        const errorMessage: Message = {
-          ...lastMessage,
-          content: `Error: ${pendingResponse.error}`,
-          isGenerating: false,
-          progressStage: undefined,
-        };
-
-        const updatedMessages = currentChat.messages.map(m =>
-          m.id === lastMessage.id ? errorMessage : m
-        );
-
-        const updatedChat = {
-          ...currentChat,
-          messages: updatedMessages,
-          updatedAt: Date.now(),
-        };
-
-        setCurrentChat(updatedChat);
-
-        const updatedChats = chats.map((c) =>
-          c.id === currentChat.id ? updatedChat : c
-        );
-        setChats(updatedChats);
-        chrome.storage.local.set({ chats: updatedChats });
-      }
-    }
   };
 
   const sendMessage = async (content: string, includePageContext: boolean = false) => {
@@ -471,29 +364,25 @@ CONTEXT-AWARE INSTRUCTIONS:
         requestBody.max_tokens = 4000; // GPT-3.5-turbo and others: 4096 max
       }
 
-      // Send API request to background script (persists even if popup closes)
-      const bgResponse = await chrome.runtime.sendMessage({
-        type: 'GENERATE_EXTENSION',
-        payload: {
-          chatId: currentChat.id,
-          apiKey: settings.apiKey,
-          model: settings.model,
-          temperature: effectiveTemperature,
-          messages: allMessages,
-          requestBody: requestBody,
-        }
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${settings.apiKey}`,
+        },
+        body: JSON.stringify(requestBody),
+        signal: controller.signal,
       });
 
       clearTimeout(timeoutId);
 
-      console.log('Background script response:', bgResponse);
+      console.log('OpenAI response status:', response.status);
 
-      if (!bgResponse.success) {
-        console.error('OpenAI API error:', bgResponse.error);
-        throw new Error(bgResponse.error || 'API request failed');
+      if (!response.ok) {
+        const errorData = await response.json();
+        console.error('OpenAI API error:', errorData);
+        throw new Error(errorData.error?.message || 'API request failed');
       }
-
-      const data = bgResponse.data;
 
       let accumulatedContent = '';
 
@@ -583,14 +472,15 @@ CONTEXT-AWARE INSTRUCTIONS:
         progressIntervals.push(timeoutId);
       });
 
-      // Data already received from background script (no need to parse JSON)
+      // Wait for API response
+      const data = await response.json();
       console.log('OpenAI response:', data);
 
       // Extract token usage from API response
       const tokenUsage = data.usage ? {
-        promptTokens: data.usage.prompt_tokens || data.usage.promptTokens,
-        completionTokens: data.usage.completion_tokens || data.usage.completionTokens,
-        totalTokens: data.usage.total_tokens || data.usage.totalTokens
+        promptTokens: data.usage.prompt_tokens,
+        completionTokens: data.usage.completion_tokens,
+        totalTokens: data.usage.total_tokens
       } : undefined;
 
       if (tokenUsage) {
@@ -600,8 +490,13 @@ CONTEXT-AWARE INSTRUCTIONS:
         console.log(`   Total: ${tokenUsage.totalTokens} tokens`);
       }
 
-      // Extract content from background script response
-      accumulatedContent = data.content || '';
+      // Check if response was truncated due to token limit
+      const finishReason = data.choices[0].finish_reason;
+      if (finishReason === 'length') {
+        console.warn('⚠️ Response truncated due to token limit. Consider increasing max_completion_tokens.');
+      }
+
+      accumulatedContent = data.choices[0].message.content || '';
 
       if (!accumulatedContent) {
         throw new Error('Empty response from OpenAI API. The model may have hit token limits or encountered an error.');

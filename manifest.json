@@ -32,8 +32,5 @@
   },
   "sandbox": {
     "pages": ["sandbox.html"]
-  },
-  "background": {
-    "service_worker": "background.js"
   }
 }
